@@ -9,7 +9,7 @@ val stravaFeedFiltersPatch = bytecodePatch(
 ) {
     compatibleWith("com.strava"("466.12"))
 
-    execute {
+    apply {
         // Intentionally empty until a stable feed-list hook is identified.
         // Current APK clues point at FeedListFragment, FeedListPresenter,
         // GenericFeedContent, and com.strava.modularui.data.FeedActivity.
