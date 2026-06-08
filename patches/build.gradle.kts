@@ -1,13 +1,13 @@
-group = "app.revanced"
+group = "io.github.rrokot.revanced"
 
 patches {
     about {
-        name = "ReVanced Patches template"
-        description = "Patches template for ReVanced"
-        source = "git@github.com:revanced/revanced-patches-template.git"
-        author = "ReVanced"
-        contact = "contact@revanced.app"
-        website = "https://revanced.app"
+        name = "Strava Feed Filters"
+        description = "Experimental ReVanced patches for Strava feed filtering."
+        source = "https://github.com/rrokot/strava-feed-filters"
+        author = "rrokot"
+        contact = "https://github.com/rrokot"
+        website = "https://github.com/rrokot/strava-feed-filters"
         license = "GNU General Public License v3.0"
     }
 }
