@@ -9,6 +9,9 @@ on:
 jobs:
   release:
     name: Build
+    permissions:
+      contents: read
+      packages: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,4 +31,4 @@ jobs:
       - name: Build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gradlew build --no-daemon
+        run: ./gradlew build --no-daemon "-PgithubPackagesUsername=${{ github.actor }}" "-PgithubPackagesPassword=${{ secrets.GITHUB_TOKEN }}"
