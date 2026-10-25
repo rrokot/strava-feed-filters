@@ -1,17 +1,17 @@
 # strava-feed-filters
 
 One source ships two ways: `strava-photo-filter-toggle.user.js` is the userscript and
-the single source of truth; `extension/content.js` is generated from it and committed.
+the single source of truth, including the version in its `// @version` line.
 
-- Edit the userscript, never `extension/content.js`. Then run
-  `python package-extension.py`: it regenerates `content.js`, validates the manifest, and
-  builds the store zip in `dist/`. CI fails if the committed `content.js` is stale.
-- `strava-photo-filter-toggle.meta.js` must stay an exact copy of the userscript's
-  `==UserScript==` header (Tampermonkey polls it for updates). A release bumps the
-  version in the header, the `.meta.js` copy, and `extension/manifest.json`; the
-  packaging script refuses any mismatch.
-- `amo.py` and `cws.py` talk to the live Firefox Add-ons and Chrome Web Store listings
-  using credentials from `.env`. `amo.py show` and `cws.py status` are read-only; run
-  `sign`, `set-links` or `publish` only when asked.
+- Edit the userscript, never the generated files. Then run `python package-extension.py`:
+  it regenerates `extension/content.js`, the `strava-photo-filter-toggle.meta.js` stub
+  (Tampermonkey polls it for updates) and the manifest version, and builds the store zip
+  in `dist/`. CI fails if a committed generated file is stale.
+- Release with `python release.py patch|minor|major`, which bumps, commits and tags;
+  `git push --follow-tags` then publishes to GitHub and both stores through
+  `.github/workflows/release.yml`. Push tags only when asked. See `docs/releasing.md`.
+- `amo.py` and `cws.py` talk to the live Firefox Add-ons and Chrome Web Store listings.
+  `amo.py show` and `cws.py status` are read-only; run `set-links` or `publish` only
+  when asked.
 - The repo keeps no Node dependencies; lint with
-  `npx --yes web-ext lint --source-dir=extension`, as CI does.
+  `npx --yes web-ext@10.8.0 lint --source-dir=extension`, as CI does.

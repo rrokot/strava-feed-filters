@@ -21,6 +21,5 @@ apk/
 build/
 local.properties
 
-# AMO API credentials (read by amo.py)
+# Store API settings (read by amo.py and cws.py)
 .env
-extension/.amo-upload-uuid

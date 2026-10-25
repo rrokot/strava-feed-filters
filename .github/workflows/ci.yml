@@ -1,10 +1,13 @@
-name: Build
+name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   package:
@@ -19,25 +22,24 @@ jobs:
       - name: Check the userscript parses
         run: node --check strava-photo-filter-toggle.user.js
 
+      # Regenerates content.js, the .meta.js stub and the manifest version from the
+      # userscript, and builds the store zip.
+      - name: Package the extension
+        run: python package-extension.py
+
+      # The generated files are committed (Tampermonkey and the stores read them from the
+      # repository), so they go stale if someone edits the userscript without repackaging.
+      - name: Fail if generated files are out of date
+        run: git diff --exit-code
+
       # Mozilla's addons-linter, the same one AMO review runs: manifest schema, missing
       # icon files, remote code, deprecated APIs. Run via npx so the repository keeps no
       # Node dependencies. Warnings do not fail the build; errors do.
       - name: Lint the extension for the add-on stores
-        run: npx --yes web-ext lint --source-dir=extension
-
-      # Checks what the linter cannot know about: that the manifest, userscript header
-      # and .meta.js stub agree on the version and that the content script keeps the
-      # userscript's page context. Also regenerates extension/content.js.
-      - name: Validate and package the extension
-        run: python package-extension.py
-
-      # content.js is generated from the userscript but committed, so it can go stale if
-      # someone edits the userscript without repackaging.
-      - name: Fail if extension/content.js is out of date
-        run: git diff --exit-code extension/content.js
+        run: npx --yes web-ext@10.8.0 lint --source-dir=extension
 
       - uses: actions/upload-artifact@v7
         with:
-          name: extension-zip
+          name: extension
           path: dist/*.zip
           if-no-files-found: error

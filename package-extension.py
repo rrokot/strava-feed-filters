@@ -6,10 +6,11 @@ import zipfile
 from pathlib import Path
 
 
-# Packages extension/ into a store-ready zip and regenerates content.js from the
-# userscript. The checks here cover only what is specific to shipping one source as both
-# a userscript and an extension; generic manifest validation (schema, icon files, AMO
-# rules) is left to web-ext lint, which CI runs against extension/.
+# Generates everything derived from the userscript and packs extension/ into a store-ready
+# zip. The userscript is the only source: its header carries the one version number, which
+# this script copies into the .meta.js stub Tampermonkey polls for updates and into the
+# manifest, and its body becomes content.js. CI fails if any generated file is stale.
+# Generic manifest validation (schema, icon files, AMO rules) is left to web-ext lint.
 
 ROOT = Path(__file__).resolve().parent
 EXTENSION_DIR = ROOT / "extension"
@@ -19,8 +20,10 @@ META_PATH = ROOT / "strava-photo-filter-toggle.meta.js"
 CONTENT_PATH = EXTENSION_DIR / "content.js"
 DIST_DIR = ROOT / "dist"
 
-METADATA_BLOCK_PATTERN = re.compile(r"(?s)^// ==UserScript==.*?// ==/UserScript==")
-VERSION_PATTERN = re.compile(r"^// @version\s+(\S+)\s*$", re.MULTILINE)
+METADATA_PATTERN = re.compile(r"(?s)\A(// ==UserScript==\n.*?\n// ==/UserScript==\n)\n")
+VERSION_PATTERN = re.compile(r"^// @version\s+(\S+)$", re.MULTILINE)
+# Fixed entry timestamps make the zip byte-for-byte reproducible from the same sources.
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
 def assert_valid(condition: bool, message: str) -> None:
@@ -28,96 +31,46 @@ def assert_valid(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
-def strip_userscript_metadata(source: str) -> str:
-    content = re.sub(
-        r"(?s)^// ==UserScript==.*?// ==/UserScript==\r?\n\r?\n",
-        "",
-        source,
-        count=1,
-    )
-    if content == source:
-        raise RuntimeError("Could not strip userscript metadata from strava-photo-filter-toggle.user.js")
-    return content
-
-
-def read_metadata_block(source: str, origin: str) -> str:
-    match = METADATA_BLOCK_PATTERN.search(source)
-    assert_valid(match is not None, f"{origin} has no userscript metadata block")
-    return match.group(0)
-
-
-def read_version(metadata: str, origin: str) -> str:
-    match = VERSION_PATTERN.search(metadata)
-    assert_valid(match is not None, f"{origin} has no // @version line")
-    return match.group(1)
+def write_if_changed(path: Path, text: str) -> None:
+    if not path.exists() or path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def zip_extension(zip_path: Path) -> None:
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for file_path in sorted(EXTENSION_DIR.iterdir()):
-            # Dotfiles are local tool state, such as the .amo-upload-uuid web-ext sign leaves.
+            # Dotfiles are local tool state, not part of the extension.
             if file_path.is_file() and not file_path.name.startswith("."):
-                archive.write(file_path, file_path.name)
+                archive.writestr(zipfile.ZipInfo(file_path.name, ZIP_TIMESTAMP), file_path.read_bytes(),
+                                 compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 
 
 def main() -> int:
-    assert_valid(MANIFEST_PATH.exists(), "extension/manifest.json is missing")
-    assert_valid(USER_SCRIPT_PATH.exists(), f"{USER_SCRIPT_PATH.name} is missing")
-    assert_valid(META_PATH.exists(), f"{META_PATH.name} is missing")
+    source = USER_SCRIPT_PATH.read_text(encoding="utf-8")
+    assert_valid("\r" not in source, f"{USER_SCRIPT_PATH.name} must use LF line endings")
+    metadata = METADATA_PATTERN.match(source)
+    assert_valid(metadata is not None, f"{USER_SCRIPT_PATH.name} must start with a metadata block and a blank line")
+    version = VERSION_PATTERN.search(metadata.group(1))
+    assert_valid(version is not None, f"{USER_SCRIPT_PATH.name} has no // @version line")
+    version = version.group(1)
 
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-
-    # The version is carried by three files: the manifest, the userscript header, and the
-    # .meta.js stub Tampermonkey polls for updates. Drift between them silently stops
-    # userscript updates, so the stub has to stay a copy of the header.
-    user_script_source = USER_SCRIPT_PATH.read_text(encoding="utf-8")
-    metadata = read_metadata_block(user_script_source, USER_SCRIPT_PATH.name)
-    assert_valid(
-        META_PATH.read_text(encoding="utf-8").strip() == metadata.strip(),
-        f"{META_PATH.name} is out of sync with the {USER_SCRIPT_PATH.name} metadata block",
-    )
-    script_version = read_version(metadata, USER_SCRIPT_PATH.name)
-    manifest_version = manifest.get("version")
-    assert_valid(
-        script_version == manifest_version,
-        f"{USER_SCRIPT_PATH.name} @version {script_version} does not match manifest version {manifest_version}",
-    )
-
-    # The userscript runs in the page context (@grant none), so the content script has to
-    # as well: patching history.pushState from an isolated world would not see Strava's own
-    # SPA navigations, and the two builds would drift apart in behaviour.
+    # The userscript runs in the page context (@grant none), so the content script does
+    # too; an isolated world would make the two builds behave differently.
     content_scripts = manifest.get("content_scripts") or []
     assert_valid(bool(content_scripts), "manifest content_scripts is missing")
     assert_valid(
         all(entry.get("world") == "MAIN" for entry in content_scripts),
         "content scripts must declare \"world\": \"MAIN\" to match the userscript's page context",
     )
+    manifest["version"] = version
 
-    assert_valid(
-        manifest.get("browser_specific_settings", {}).get("gecko", {}).get("id"),
-        "Firefox gecko id is missing",
-    )
-    assert_valid(
-        manifest.get("browser_specific_settings", {})
-        .get("gecko", {})
-        .get("data_collection_permissions", {})
-        .get("required")
-        == ["none"],
-        "Firefox data collection permissions must be ['none']",
-    )
-    assert_valid(
-        manifest.get("browser_specific_settings", {}).get("gecko_android") == {},
-        "Firefox Android support requires empty gecko_android settings",
-    )
-
-    CONTENT_PATH.write_bytes(strip_userscript_metadata(user_script_source).encode("utf-8"))
-
-    zip_path = DIST_DIR / f"strava-feed-filters-{manifest['version']}.zip"
+    write_if_changed(META_PATH, metadata.group(1))
+    write_if_changed(MANIFEST_PATH, json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    write_if_changed(CONTENT_PATH, source[metadata.end():])
 
     DIST_DIR.mkdir(exist_ok=True)
-    if zip_path.exists():
-        zip_path.unlink()
-
+    zip_path = DIST_DIR / f"strava-feed-filters-{version}.zip"
     zip_extension(zip_path)
     print(zip_path)
     return 0

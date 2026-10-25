@@ -155,7 +155,7 @@
     function readStoredValue(key) {
         try {
             return localStorage.getItem(key);
-        } catch (_) {
+        } catch {
             return null;
         }
     }
@@ -163,7 +163,7 @@
     function writeStoredValue(key, value) {
         try {
             localStorage.setItem(key, value);
-        } catch (_) {
+        } catch {
             // Persistence is best-effort.
         }
     }
@@ -171,7 +171,7 @@
     function removeStoredValue(key) {
         try {
             localStorage.removeItem(key);
-        } catch (_) {
+        } catch {
             // Persistence is best-effort.
         }
     }
@@ -193,7 +193,7 @@
                     }
                 });
             }
-        } catch (_) {
+        } catch {
             removeStoredValue(ACTIVITY_TYPE_STORAGE_KEY);
         }
     }
@@ -292,10 +292,6 @@
     }
 
     function applyFilterClasses() {
-        if (!document.body) {
-            return;
-        }
-
         FILTERS.forEach(filter => {
             document.body.classList.toggle(getEntryFlag(filter.id).bodyClass, isFilterApplicable(filter));
         });
@@ -319,7 +315,7 @@
 
     // Feed entry tracking
     function isElement(node) {
-        return node && node.nodeType === Node.ELEMENT_NODE;
+        return node instanceof Element;
     }
 
     // [data-testid="tag"] holds the activity-type tag (e.g. "Virtual"). It might be
@@ -1005,31 +1001,6 @@
         rootObserver.observe(document.body, { childList: true, subtree: true });
     }
 
-    // Strava swaps feeds via the History API without a full reload, so we patch it to
-    // dispatch a synthetic event that lets us re-evaluate which filters apply.
-    function patchHistoryForLocationEvents() {
-        if (window.__stravaFeedFiltersHistoryPatched) {
-            return;
-        }
-        window.__stravaFeedFiltersHistoryPatched = true;
-
-        const dispatch = () => window.dispatchEvent(new Event('strava-feed-locationchange'));
-        const originalPushState = history.pushState;
-        const originalReplaceState = history.replaceState;
-
-        history.pushState = function() {
-            const result = originalPushState.apply(this, arguments);
-            dispatch();
-            return result;
-        };
-        history.replaceState = function() {
-            const result = originalReplaceState.apply(this, arguments);
-            dispatch();
-            return result;
-        };
-        window.addEventListener('popstate', dispatch);
-    }
-
     function syncFeedTypeToggle() {
         const toggle = document.getElementById(FEED_TYPE_TOGGLE_ID);
         if (toggle) {
@@ -1043,11 +1014,8 @@
         syncFeedTypeToggle();
     }
 
+    // Runs at document-idle, so the body is already parsed.
     function initialize() {
-        if (!document.body) {
-            document.addEventListener('DOMContentLoaded', initialize, { once: true });
-            return;
-        }
         loadFilterState();
         ensureStyles();
         applyFilterClasses();
@@ -1057,8 +1025,9 @@
         refreshFeedContainer();
         startRootObserver();
         syncFilterUi();
-        patchHistoryForLocationEvents();
-        window.addEventListener('strava-feed-locationchange', handleLocationChange);
+        // Strava swaps feeds through same-document navigations without a reload; the
+        // Navigation API reports every one of them, including pushState and back/forward.
+        navigation.addEventListener('currententrychange', handleLocationChange);
         document.addEventListener('click', closeActivityTypeMenu);
         document.addEventListener('keydown', event => {
             if (event.key === 'Escape') {

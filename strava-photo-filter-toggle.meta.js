@@ -7,7 +7,7 @@
 // @match        https://www.strava.com/dashboard*
 // @grant        none
 // @run-at       document-idle
-// @icon         https://raw.githubusercontent.com/rrokot/strava-feed-filters/main/icon-64.png
+// @icon         https://raw.githubusercontent.com/rrokot/strava-feed-filters/main/extension/icon-64.png
 // @updateURL    https://raw.githubusercontent.com/rrokot/strava-feed-filters/main/strava-photo-filter-toggle.meta.js
 // @downloadURL  https://raw.githubusercontent.com/rrokot/strava-feed-filters/main/strava-photo-filter-toggle.user.js
 // ==/UserScript==

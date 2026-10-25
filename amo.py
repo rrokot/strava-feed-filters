@@ -6,8 +6,6 @@ import hmac
 import json
 import os
 import secrets
-import shutil
-import subprocess
 import sys
 import time
 import urllib.error
@@ -21,11 +19,11 @@ from pathlib import Path
 #
 #   python amo.py show         print the listing's version and links
 #   python amo.py set-links    point homepage and support URL at the GitHub repository
-#   python amo.py sign         submit extension/ as a new listed version via web-ext
+#
+# New versions are signed and submitted by the Release workflow, not from here.
 
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
-EXTENSION_DIR = ROOT / "extension"
 
 ADDON = "strava-feed-filters"
 API = f"https://addons.mozilla.org/api/v5/addons/addon/{ADDON}/"
@@ -102,23 +100,12 @@ def set_links(credentials: tuple[str, str]) -> None:
     show(credentials)
 
 
-def sign(credentials: tuple[str, str]) -> None:
-    npx = shutil.which("npx")
-    if npx is None:
-        sys.exit("npx not found; install Node.js")
-    issuer, secret = credentials
-    env = {**os.environ, "WEB_EXT_API_KEY": issuer, "WEB_EXT_API_SECRET": secret}
-    command = [npx, "--yes", "web-ext", "sign", "--channel=listed",
-               f"--source-dir={EXTENSION_DIR}", f"--artifacts-dir={ROOT / 'dist'}"]
-    sys.exit(subprocess.call(command, env=env))
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Manage the Firefox Add-ons listing.")
-    parser.add_argument("command", choices=["show", "set-links", "sign"])
+    parser.add_argument("command", choices=["show", "set-links"])
     args = parser.parse_args()
     credentials = load_credentials()
-    {"show": show, "set-links": set_links, "sign": sign}[args.command](credentials)
+    {"show": show, "set-links": set_links}[args.command](credentials)
 
 
 if __name__ == "__main__":

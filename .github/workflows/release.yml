@@ -1,0 +1,94 @@
+name: Release
+
+# Runs for the version tags release.py creates, e.g. v5.54.0.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+
+      - name: Check that the tag matches the userscript version
+        run: grep -Eq "^// @version +${GITHUB_REF_NAME#v}$" strava-photo-filter-toggle.user.js
+
+      - run: node --check strava-photo-filter-toggle.user.js
+      - run: python package-extension.py
+      - run: git diff --exit-code
+      - run: npx --yes web-ext@10.8.0 lint --source-dir=extension
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: extension
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip strava-photo-filter-toggle.user.js --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  chrome-web-store:
+    needs: package
+    runs-on: ubuntu-latest
+    environment: chrome-web-store
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension
+          path: dist
+
+      # Keyless: GitHub's OIDC token is exchanged for a short-lived token of the service
+      # account that the Chrome Web Store dashboard trusts.
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.CWS_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+
+      - run: python cws.py publish dist/strava-feed-filters-${GITHUB_REF_NAME#v}.zip
+        env:
+          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+
+  firefox-add-ons:
+    needs: package
+    runs-on: ubuntu-latest
+    environment: firefox-add-ons
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension
+          path: dist
+
+      # Signs the exact package the other stores get. AMO reviews listed versions on its
+      # own schedule, so the job submits without waiting for approval.
+      - name: Submit to Firefox Add-ons
+        run: |
+          unzip -q "dist/strava-feed-filters-${GITHUB_REF_NAME#v}.zip" -d extension
+          npx --yes web-ext@10.8.0 sign --channel=listed --source-dir=extension --artifacts-dir=signed --approval-timeout=0
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
