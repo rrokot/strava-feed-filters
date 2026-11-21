@@ -1,6 +1,5 @@
 name: Release
 
-# Runs for the version tags release.py creates, e.g. v5.54.0.
 on:
   push:
     tags: ['v*']
@@ -58,9 +57,8 @@ jobs:
           name: extension
           path: dist
 
-      # Keyless: GitHub's OIDC token is exchanged for a short-lived token of the service
-      # account that the Chrome Web Store dashboard trusts.
       - id: auth
+        name: Exchange the GitHub OIDC token for a Chrome Web Store access token
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -83,9 +81,7 @@ jobs:
           name: extension
           path: dist
 
-      # Signs the exact package the other stores get. AMO reviews listed versions on its
-      # own schedule, so the job submits without waiting for approval.
-      - name: Submit to Firefox Add-ons
+      - name: Submit the packaged extension to Firefox Add-ons without waiting for review
         run: |
           unzip -q "dist/strava-feed-filters-${GITHUB_REF_NAME#v}.zip" -d extension
           npx --yes web-ext@10.8.0 sign --channel=listed --source-dir=extension --artifacts-dir=signed --approval-timeout=0

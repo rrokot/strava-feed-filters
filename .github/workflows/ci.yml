@@ -22,19 +22,12 @@ jobs:
       - name: Check the userscript parses
         run: node --check strava-photo-filter-toggle.user.js
 
-      # Regenerates content.js, the .meta.js stub and the manifest version from the
-      # userscript, and builds the store zip.
-      - name: Package the extension
+      - name: Regenerate files from the userscript and package the extension
         run: python package-extension.py
 
-      # The generated files are committed (Tampermonkey and the stores read them from the
-      # repository), so they go stale if someone edits the userscript without repackaging.
-      - name: Fail if generated files are out of date
+      - name: Verify the committed generated files are current
         run: git diff --exit-code
 
-      # Mozilla's addons-linter, the same one AMO review runs: manifest schema, missing
-      # icon files, remote code, deprecated APIs. Run via npx so the repository keeps no
-      # Node dependencies. Warnings do not fail the build; errors do.
       - name: Lint the extension for the add-on stores
         run: npx --yes web-ext@10.8.0 lint --source-dir=extension
 

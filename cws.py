@@ -11,25 +11,14 @@ import urllib.request
 from pathlib import Path
 
 
-# Talks to the Chrome Web Store API v2 as the publisher's service account, with a
-# short-lived access token and no stored keys (see docs/releasing.md):
-#
-#   python cws.py status               print the published and submitted versions
-#   python cws.py publish <zip>        upload a package and submit it for review
-#
-# The Release workflow runs `publish` with CWS_ACCESS_TOKEN issued through Workload
-# Identity Federation. Run locally, the token is minted with gcloud by impersonating
-# CWS_SERVICE_ACCOUNT. Settings come from the environment or from .env next to this file.
-# The API cannot edit the store listing; that stays in the Developer Dashboard.
-
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
 
 EXTENSION_ID = "jdefobolefeekjbgaclabbcffmebamdo"
 API = "https://chromewebstore.googleapis.com"
 SCOPE = "https://www.googleapis.com/auth/chromewebstore"
-POLL_INTERVAL = 5
-POLL_ATTEMPTS = 60
+UPLOAD_POLL_INTERVAL_SECONDS = 5
+MAX_UPLOAD_STATUS_POLLS = 60
 
 
 def setting(name: str) -> str:
@@ -43,7 +32,7 @@ def setting(name: str) -> str:
     sys.exit(f"Set {name} in the environment or in {ENV_PATH}")
 
 
-def access_token() -> str:
+def get_store_access_token() -> str:
     if token := os.environ.get("CWS_ACCESS_TOKEN"):
         return token
     gcloud = shutil.which("gcloud")
@@ -54,10 +43,10 @@ def access_token() -> str:
     return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
 
 
-class Item:
+class StoreItem:
     def __init__(self) -> None:
         self.path = f"publishers/{setting('CWS_PUBLISHER_ID')}/items/{EXTENSION_ID}"
-        self.token = access_token()
+        self.token = get_store_access_token()
 
     def call(self, action: str, method: str = "GET", body: bytes | None = None,
              content_type: str | None = None, upload: bool = False) -> dict:
@@ -73,33 +62,32 @@ class Item:
             sys.exit(f"{method} {url} failed: HTTP {error.code} {error.read().decode(errors='replace')}")
 
 
-def describe(revision: dict | None) -> str:
+def describe_revision(revision: dict | None) -> str:
     if not revision:
         return "none"
     versions = ", ".join(channel.get("crxVersion", "?") for channel in revision.get("distributionChannels", []))
     return f"{versions or '?'} ({revision.get('state')})"
 
 
-def status(item: Item) -> None:
+def status(item: StoreItem) -> None:
     result = item.call("fetchStatus")
-    print(f"published: {describe(result.get('publishedItemRevisionStatus'))}")
-    print(f"submitted: {describe(result.get('submittedItemRevisionStatus'))}")
+    print(f"published: {describe_revision(result.get('publishedItemRevisionStatus'))}")
+    print(f"submitted: {describe_revision(result.get('submittedItemRevisionStatus'))}")
     if "lastAsyncUploadState" in result:
         print(f"last upload: {result['lastAsyncUploadState']}")
 
 
-def publish(item: Item, zip_path: Path) -> None:
-    result = item.call("upload", "POST", zip_path.read_bytes(), "application/zip", upload=True)
-    state = result.get("uploadState")
-    # Large packages are processed asynchronously; fetchStatus reports when they finish.
-    for _ in range(POLL_ATTEMPTS):
-        if state != "IN_PROGRESS":
+def publish(item: StoreItem, zip_path: Path) -> None:
+    upload = item.call("upload", "POST", zip_path.read_bytes(), "application/zip", upload=True)
+    upload_state = upload.get("uploadState")
+    for _ in range(MAX_UPLOAD_STATUS_POLLS):
+        if upload_state != "IN_PROGRESS":
             break
-        time.sleep(POLL_INTERVAL)
-        state = item.call("fetchStatus").get("lastAsyncUploadState")
-    if state != "SUCCEEDED":
-        sys.exit(f"Upload of {zip_path.name} ended as {state}: {json.dumps(result)}")
-    print(f"Uploaded {result.get('crxVersion', zip_path.name)}")
+        time.sleep(UPLOAD_POLL_INTERVAL_SECONDS)
+        upload_state = item.call("fetchStatus").get("lastAsyncUploadState")
+    if upload_state != "SUCCEEDED":
+        sys.exit(f"Upload of {zip_path.name} ended as {upload_state}: {json.dumps(upload)}")
+    print(f"Uploaded {upload.get('crxVersion', zip_path.name)}")
 
     body = json.dumps({"publishType": "DEFAULT_PUBLISH"}).encode()
     published = item.call("publish", "POST", body, "application/json")
@@ -116,7 +104,7 @@ def main() -> None:
     commands.add_parser("status")
     commands.add_parser("publish").add_argument("zip", type=Path)
     args = parser.parse_args()
-    item = Item()
+    item = StoreItem()
     if args.command == "status":
         status(item)
     else:

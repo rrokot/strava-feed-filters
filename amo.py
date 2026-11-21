@@ -13,15 +13,6 @@ import urllib.request
 from pathlib import Path
 
 
-# Manages the Firefox Add-ons (AMO) listing from the command line. Credentials come from
-# .env next to this file (git-ignored): AMO_JWT_ISSUER and AMO_JWT_SECRET, created at
-# https://addons.mozilla.org/en-US/developers/addon/api/key/
-#
-#   python amo.py show         print the listing's version and links
-#   python amo.py set-links    point homepage and support URL at the GitHub repository
-#
-# New versions are signed and submitted by the Release workflow, not from here.
-
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
 
@@ -29,6 +20,7 @@ ADDON = "strava-feed-filters"
 API = f"https://addons.mozilla.org/api/v5/addons/addon/{ADDON}/"
 REPOSITORY = "https://github.com/rrokot/strava-feed-filters"
 LOCALE = "en-US"
+JWT_LIFETIME_SECONDS = 60
 
 
 def load_credentials() -> tuple[str, str]:
@@ -49,47 +41,51 @@ def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def make_token(issuer: str, secret: str) -> str:
-    # AMO accepts HS256 tokens that expire at most five minutes after issue.
-    now = int(time.time())
+def make_amo_jwt(issuer: str, secret: str) -> str:
+    issued_at = int(time.time())
     header = b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-    claims = b64url(json.dumps({"iss": issuer, "jti": secrets.token_hex(16), "iat": now, "exp": now + 60}).encode())
+    claims = b64url(json.dumps({
+        "iss": issuer,
+        "jti": secrets.token_hex(16),
+        "iat": issued_at,
+        "exp": issued_at + JWT_LIFETIME_SECONDS,
+    }).encode())
     signature = hmac.new(secret.encode(), f"{header}.{claims}".encode(), hashlib.sha256).digest()
     return f"{header}.{claims}.{b64url(signature)}"
 
 
 def request(method: str, credentials: tuple[str, str], body: dict | None = None) -> dict:
-    req = urllib.request.Request(
+    addon_request = urllib.request.Request(
         API,
         method=method,
         data=json.dumps(body).encode() if body is not None else None,
         headers={
-            "Authorization": f"JWT {make_token(*credentials)}",
+            "Authorization": f"JWT {make_amo_jwt(*credentials)}",
             "Content-Type": "application/json",
             "User-Agent": "strava-feed-filters-amo/1.0",
         },
     )
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(addon_request) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
         sys.exit(f"AMO {method} failed: HTTP {error.code} {error.read().decode(errors='replace')}")
 
 
-def localized(field) -> str | None:
-    # Read responses wrap translated URLs as {"url": {locale: ...}, "outgoing": ...}.
-    if isinstance(field, dict):
-        field = field.get("url", field)
-    if isinstance(field, dict):
-        return field.get(LOCALE) or next(iter(field.values()), None)
-    return field
+def localized_url(url_field: str | dict | None) -> str | None:
+    if not isinstance(url_field, dict):
+        return url_field
+    urls_by_locale = url_field.get("url", url_field)
+    if isinstance(urls_by_locale, dict):
+        return urls_by_locale.get(LOCALE) or next(iter(urls_by_locale.values()), None)
+    return urls_by_locale
 
 
 def show(credentials: tuple[str, str]) -> None:
     addon = request("GET", credentials)
     print(f"version:  {addon['current_version']['version']}")
-    print(f"homepage: {localized(addon.get('homepage'))}")
-    print(f"support:  {localized(addon.get('support_url'))}")
+    print(f"homepage: {localized_url(addon.get('homepage'))}")
+    print(f"support:  {localized_url(addon.get('support_url'))}")
 
 
 def set_links(credentials: tuple[str, str]) -> None:

@@ -1,7 +1,6 @@
 (function() {
     'use strict';
 
-    // Configuration
     const FEED_CONTAINER_SELECTOR = '.feature-feed';
     const FEED_ENTRY_SELECTOR = '[data-testid="web-feed-entry"]';
     const FEED_FILTER_INPUT_ID = 'feedFilter';
@@ -15,7 +14,7 @@
     const ACTIVITY_TYPE_TITLE_SELECTOR = 'svg[data-testid="activity-icon"] title';
     const UNFILLED_KUDOS_SELECTOR = 'svg[data-testid="unfilled_kudos"]';
     const OWNER_LINK_SELECTOR = '[data-testid="owners-name"], [data-testid="owner-avatar"]';
-    const ME_LINK_SELECTOR = 'header a[href*="/athletes/"], nav a[href*="/athletes/"]';
+    const HEADER_ATHLETE_LINK_SELECTOR = 'header a[href*="/athletes/"], nav a[href*="/athletes/"]';
     const UNSTYLED_GIFT_LINK_SELECTOR = 'a[href*="/gift"].btn-primary';
     const ATHLETE_HREF_PATTERN = /\/athletes\/(\d+)/;
     const ACTIVITY_TYPE_FILTER_ID = 'activityType';
@@ -24,110 +23,84 @@
     const BUTTON_INACTIVE_COLOR = '#888';
     const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
-    // Feed-type toggle replaces Strava's react-select dropdown. Switching reloads the
-    // dashboard since Strava's React tree doesn't react to pushState/popstate alone.
+    const FOLLOWING_FEED = 'following';
+    const MY_ACTIVITY_FEED = 'my_activity';
     const FEED_TYPES = [
-        { id: 'following', label: 'Following', url: '/dashboard' },
-        { id: 'my_activity', label: 'My Activity', url: '/dashboard?feed_type=my_activity' }
+        { id: FOLLOWING_FEED, label: 'Following', url: '/dashboard' },
+        { id: MY_ACTIVITY_FEED, label: 'My Activity', url: `/dashboard?feed_type=${MY_ACTIVITY_FEED}` }
     ];
 
-    // Filter definitions
-    const FILTERS = [
+    const FEED_FILTERS = [
         {
             id: 'photo',
             title: 'Hide posts without photos or videos',
             storageKey: 'stravaPhotoFilterEnabled',
             defaultEnabled: true,
-            iconFactory: () => createPathIcon(
-                '0 0 24 24',
-                'M12 5c-3.86 0-7 3.14-7 7s3.14 7 7 7 7-3.14 7-7-3.14-7-7-7zm0-2c1.1 0 2 .9 2 2h3.17C18.6 5 19 5.4 19 5.83V7h1c1.1 0 2 .9 2 2v9c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V9c0-1.1.9-2 2-2h1V5.83C5 5.4 5.4 5 5.83 5H9c0-1.1.9-2 2-2zm0 5c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z'
-            )
+            hiddenEntryAttribute: 'data-strava-no-media-entry',
+            activeBodyClass: 'strava-hide-no-photo',
+            hidesEntry: entry => !entry.hasMedia,
+            iconFactory: createCameraIcon
         },
         {
             id: 'virtual',
             title: 'Hide virtual activities',
             storageKey: 'stravaVirtualFilterEnabled',
             defaultEnabled: false,
+            hiddenEntryAttribute: 'data-strava-virtual-entry',
+            activeBodyClass: 'strava-hide-virtual',
+            hidesEntry: entry => entry.isVirtual,
             iconFactory: () => createTextIcon('VR')
+        },
+        {
+            id: ACTIVITY_TYPE_FILTER_ID,
+            hiddenEntryAttribute: 'data-strava-hidden-activity-type-entry',
+            activeBodyClass: 'strava-hide-activity-types',
+            hidesEntry: entry => hasOnlyHiddenActivityTypes(entry.activityTypes)
         },
         {
             id: 'unliked',
             title: 'Show posts I have not liked yet',
             storageKey: 'stravaUnlikedFilterEnabled',
             defaultEnabled: false,
-            // Same path Strava uses for its filled_kudos icon, so the filter mirrors the affordance it controls.
-            iconFactory: () => createPathIcon(
-                '0 0 16 16',
-                'M14.625 10.96V9.5l.275-.338A1.94 1.94 0 0013.394 6H8.6l.496-4.055A1.735 1.735 0 007.374 0a.578.578 0 00-.527.34l-2.5 5.556a.667.667 0 01-.184.24L1.243 8.55A.667.667 0 001 9.064v3.603C1 13.403 1.597 14 2.333 14h1.468l1.163.776c.219.146.477.224.74.224h6.171A2.125 2.125 0 0014 12.875v-.395l.112-.13c.331-.387.513-.88.513-1.39z'
-            )
+            disabledOnMyActivityFeed: true,
+            hiddenEntryAttribute: 'data-strava-liked-entry',
+            activeBodyClass: 'strava-show-unliked',
+            hidesEntry: entry => !entry.hasUnfilledKudosIcon,
+            iconFactory: createFilledKudosIcon
         },
         {
             id: 'mine',
             title: 'Hide my own posts',
             storageKey: 'stravaMineFilterEnabled',
             defaultEnabled: false,
+            disabledOnMyActivityFeed: true,
+            hiddenEntryAttribute: 'data-strava-mine-entry',
+            activeBodyClass: 'strava-hide-mine',
+            hidesEntry: entry => entry.isMyPost,
             iconFactory: () => createTextIcon('ME')
         }
     ];
 
-    // One row per way a feed entry can be hidden: the attribute stamped on the entry, the
-    // body class that switches the matching CSS rule on, and how to read the flag off an
-    // analyzed entry. Styling, tracking and badge counts all iterate this table, so a new
-    // filter is one row here plus, if it needs a toggle button, one in FILTERS.
-    const ENTRY_FLAGS = [
-        {
-            id: 'photo',
-            attribute: 'data-strava-no-media-entry',
-            bodyClass: 'strava-hide-no-photo',
-            test: state => !state.hasMedia
-        },
-        {
-            id: 'virtual',
-            attribute: 'data-strava-virtual-entry',
-            bodyClass: 'strava-hide-virtual',
-            test: state => state.isVirtual
-        },
-        {
-            id: 'unliked',
-            attribute: 'data-strava-liked-entry',
-            bodyClass: 'strava-show-unliked',
-            test: state => state.likedByMe
-        },
-        {
-            id: 'mine',
-            attribute: 'data-strava-mine-entry',
-            bodyClass: 'strava-hide-mine',
-            test: state => state.mine
-        },
-        {
-            id: ACTIVITY_TYPE_FILTER_ID,
-            attribute: 'data-strava-hidden-activity-type-entry',
-            bodyClass: 'strava-hide-activity-types',
-            test: state => areAllActivityTypesHidden(state.activityTypes)
-        }
-    ];
+    const TOGGLE_FILTERS = FEED_FILTERS.filter(filter => filter.id !== ACTIVITY_TYPE_FILTER_ID);
 
-    // Runtime state
-    let rootObserver = null;
     let feedObserver = null;
     let feedContainer = null;
     let myAthleteId = null;
-    let stravaButtonClass = null;
-    let rootCheckScheduled = false;
-    const filterState = {};
-    const filterUi = {};
-    const trackedEntries = new Map();
+    let stravaKudosButtonClass = null;
+    let dashboardRefreshScheduled = false;
+    const enabledToggleFilters = {};
+    const filterControls = {};
+    const filterMatchesByEntry = new Map();
     const hiddenActivityTypes = new Set();
     const activityTypeLabels = new Map();
 
-    // Style and state helpers
-    function ensureStyles() {
+    function installFilterStyles() {
         if (document.getElementById(STYLE_ELEMENT_ID)) {
             return;
         }
 
-        const hideRules = ENTRY_FLAGS.map(flag => `
-            body.${flag.bodyClass} ${FEED_CONTAINER_SELECTOR} ${FEED_ENTRY_SELECTOR}[${flag.attribute}="true"] {
+        const hideRules = FEED_FILTERS.map(filter => `
+            body.${filter.activeBodyClass} ${FEED_CONTAINER_SELECTOR} ${FEED_ENTRY_SELECTOR}[${filter.hiddenEntryAttribute}="true"] {
                 display: none !important;
             }
         `).join('');
@@ -145,14 +118,7 @@
         document.head.appendChild(style);
     }
 
-    function getEntryFlag(flagId) {
-        return ENTRY_FLAGS.find(flag => flag.id === flagId);
-    }
-
-    // Site data can be blocked (Chrome's per-site "block data" setting, Firefox ETP), and
-    // then every localStorage access throws. Filters still work for the session in that
-    // case, they just stop persisting.
-    function readStoredValue(key) {
+    function readStoredPreference(key) {
         try {
             return localStorage.getItem(key);
         } catch {
@@ -160,30 +126,30 @@
         }
     }
 
-    function writeStoredValue(key, value) {
+    function tryPersistPreference(key, value) {
         try {
             localStorage.setItem(key, value);
         } catch {
-            // Persistence is best-effort.
+            return;
         }
     }
 
-    function removeStoredValue(key) {
+    function tryRemoveStoredPreference(key) {
         try {
             localStorage.removeItem(key);
         } catch {
-            // Persistence is best-effort.
+            return;
         }
     }
 
-    function loadFilterState() {
-        FILTERS.forEach(filter => {
-            const savedValue = readStoredValue(filter.storageKey);
-            filterState[filter.id] = savedValue === null ? filter.defaultEnabled : savedValue === 'true';
+    function loadFilterPreferences() {
+        TOGGLE_FILTERS.forEach(filter => {
+            const savedValue = readStoredPreference(filter.storageKey);
+            enabledToggleFilters[filter.id] = savedValue === null ? filter.defaultEnabled : savedValue === 'true';
         });
 
         try {
-            const savedTypes = JSON.parse(readStoredValue(ACTIVITY_TYPE_STORAGE_KEY) || '[]');
+            const savedTypes = JSON.parse(readStoredPreference(ACTIVITY_TYPE_STORAGE_KEY) || '[]');
             if (Array.isArray(savedTypes)) {
                 savedTypes.forEach(label => {
                     const normalized = normalizeText(label);
@@ -194,13 +160,13 @@
                 });
             }
         } catch {
-            removeStoredValue(ACTIVITY_TYPE_STORAGE_KEY);
+            tryRemoveStoredPreference(ACTIVITY_TYPE_STORAGE_KEY);
         }
     }
 
     function saveHiddenActivityTypes() {
         const labels = [...hiddenActivityTypes].map(type => activityTypeLabels.get(type) || type);
-        writeStoredValue(ACTIVITY_TYPE_STORAGE_KEY, JSON.stringify(labels));
+        tryPersistPreference(ACTIVITY_TYPE_STORAGE_KEY, JSON.stringify(labels));
     }
 
     function updateBadge(badge, count) {
@@ -217,63 +183,45 @@
     }
 
     function getCurrentFeedType() {
-        return new URLSearchParams(window.location.search).get('feed_type') === 'my_activity'
-            ? 'my_activity'
-            : 'following';
+        return new URLSearchParams(window.location.search).get('feed_type') === MY_ACTIVITY_FEED
+            ? MY_ACTIVITY_FEED
+            : FOLLOWING_FEED;
     }
 
-    // Own activities expose a "View Kudos" button, which the liked-detection treats
-    // as liked — so the unliked and mine filters would hide every entry on the My Activity feed.
-    function isMyActivitiesFeedSelected() {
-        return getCurrentFeedType() === 'my_activity';
+    function isFilterEnabled(filter) {
+        return filter.id === ACTIVITY_TYPE_FILTER_ID
+            ? hiddenActivityTypes.size > 0
+            : enabledToggleFilters[filter.id];
     }
 
-    function isFilterApplicable(filter) {
-        if (!filterState[filter.id]) {
-            return false;
-        }
-        if ((filter.id === 'unliked' || filter.id === 'mine') && isMyActivitiesFeedSelected()) {
-            return false;
-        }
-        return true;
+    function isFilterActiveOnFeed(filter, feedType) {
+        return isFilterEnabled(filter) && !(filter.disabledOnMyActivityFeed && feedType === MY_ACTIVITY_FEED);
     }
 
     function extractAthleteId(href) {
         return href?.match(ATHLETE_HREF_PATTERN)?.[1] || null;
     }
 
-    // Returns true the first time the id becomes known so the caller can re-index entries
-    // that were tracked before the header was rendered.
-    function resolveMyAthleteIdIfPossible() {
-        if (myAthleteId) {
-            return false;
-        }
-        for (const link of document.querySelectorAll(ME_LINK_SELECTOR)) {
-            const id = extractAthleteId(link.getAttribute('href'));
-            if (id) {
-                myAthleteId = id;
-                return true;
+    function findMyAthleteIdInHeader() {
+        for (const link of document.querySelectorAll(HEADER_ATHLETE_LINK_SELECTOR)) {
+            const athleteId = extractAthleteId(link.getAttribute('href'));
+            if (athleteId) {
+                return athleteId;
             }
         }
-        return false;
+        return null;
     }
 
-    function getMyAthleteId() {
-        return myAthleteId;
-    }
-
-    // Counts are derived from the tracked entries rather than maintained incrementally:
-    // one pass over cached state objects, and nothing that can drift out of sync.
-    function countHiddenEntries() {
+    function countEntriesMatchingEachFilter() {
         const counts = {};
-        ENTRY_FLAGS.forEach(flag => {
-            counts[flag.id] = 0;
+        FEED_FILTERS.forEach(filter => {
+            counts[filter.id] = 0;
         });
 
-        trackedEntries.forEach(state => {
-            ENTRY_FLAGS.forEach(flag => {
-                if (state.flags[flag.id]) {
-                    counts[flag.id] += 1;
+        filterMatchesByEntry.forEach(matches => {
+            FEED_FILTERS.forEach(filter => {
+                if (matches[filter.id]) {
+                    counts[filter.id] += 1;
                 }
             });
         });
@@ -282,45 +230,38 @@
     }
 
     function refreshBadges() {
-        const counts = countHiddenEntries();
+        const counts = countEntriesMatchingEachFilter();
+        const feedType = getCurrentFeedType();
 
-        FILTERS.forEach(filter => {
-            const count = isFilterApplicable(filter) ? counts[filter.id] : 0;
-            updateBadge(filterUi[filter.id]?.badge, count);
+        FEED_FILTERS.forEach(filter => {
+            const count = isFilterActiveOnFeed(filter, feedType) ? counts[filter.id] : 0;
+            updateBadge(filterControls[filter.id]?.badge, count);
         });
-        updateBadge(filterUi[ACTIVITY_TYPE_FILTER_ID]?.badge, counts[ACTIVITY_TYPE_FILTER_ID]);
     }
 
-    function applyFilterClasses() {
-        FILTERS.forEach(filter => {
-            document.body.classList.toggle(getEntryFlag(filter.id).bodyClass, isFilterApplicable(filter));
+    function syncBodyFilterClasses() {
+        const feedType = getCurrentFeedType();
+        FEED_FILTERS.forEach(filter => {
+            document.body.classList.toggle(filter.activeBodyClass, isFilterActiveOnFeed(filter, feedType));
         });
-        document.body.classList.toggle(getEntryFlag(ACTIVITY_TYPE_FILTER_ID).bodyClass, hiddenActivityTypes.size > 0);
     }
 
     function syncFilterUi() {
-        FILTERS.forEach(filter => {
-            updateButtonStyle(filterUi[filter.id]?.button, filterState[filter.id]);
+        FEED_FILTERS.forEach(filter => {
+            updateButtonStyle(filterControls[filter.id]?.button, isFilterEnabled(filter));
         });
-        updateButtonStyle(filterUi[ACTIVITY_TYPE_FILTER_ID]?.button, hiddenActivityTypes.size > 0);
         refreshBadges();
     }
 
     function toggleFilter(filter) {
-        filterState[filter.id] = !filterState[filter.id];
-        writeStoredValue(filter.storageKey, filterState[filter.id] ? 'true' : 'false');
-        applyFilterClasses();
+        const enabled = !enabledToggleFilters[filter.id];
+        enabledToggleFilters[filter.id] = enabled;
+        tryPersistPreference(filter.storageKey, String(enabled));
+        syncBodyFilterClasses();
         syncFilterUi();
     }
 
-    // Feed entry tracking
-    function isElement(node) {
-        return node instanceof Element;
-    }
-
-    // [data-testid="tag"] holds the activity-type tag (e.g. "Virtual"). It might be
-    // technical and never localized, but we match locale-specific roots just in case.
-    const VIRTUAL_ACTIVITY_TOKENS = [
+    const VIRTUAL_ACTIVITY_TAG_FRAGMENTS = [
         'virtual',     // en, es, pt
         'virtuel',     // fr, da
         'virtuale',    // it
@@ -340,24 +281,19 @@
 
     function isVirtualActivity(entry) {
         const tag = normalizeText(entry.querySelector(ACTIVITY_TAG_SELECTOR)?.textContent);
-        return !!tag && VIRTUAL_ACTIVITY_TOKENS.some(token => tag.includes(token));
+        return VIRTUAL_ACTIVITY_TAG_FRAGMENTS.some(fragment => tag.includes(fragment));
     }
 
     function normalizeText(value) {
         return (value || '').trim().toLowerCase();
     }
 
-    function isLikedByMe(entry) {
-        return !entry.querySelector(UNFILLED_KUDOS_SELECTOR);
-    }
-
     function isMyPost(entry) {
-        const myId = getMyAthleteId();
-        if (!myId) {
+        if (!myAthleteId) {
             return false;
         }
         const ownerLink = entry.querySelector(OWNER_LINK_SELECTOR);
-        return extractAthleteId(ownerLink?.getAttribute('href')) === myId;
+        return extractAthleteId(ownerLink?.getAttribute('href')) === myAthleteId;
     }
 
     function getActivityTypes(entry) {
@@ -385,52 +321,46 @@
         }
     }
 
-    // Grouped posts stay visible when at least one of their activity types is enabled.
-    function areAllActivityTypesHidden(types) {
+    function hasOnlyHiddenActivityTypes(types) {
         return types.length > 0 && types.every(({ key }) => hiddenActivityTypes.has(key));
     }
 
-    function analyzeEntry(entry) {
+    function updateTrackedEntry(entry) {
         const activityTypes = getActivityTypes(entry);
         registerActivityTypes(activityTypes);
 
-        const state = {
+        const entryDetails = {
             hasMedia: !!entry.querySelector(MEDIA_SELECTOR),
             isVirtual: isVirtualActivity(entry),
-            likedByMe: isLikedByMe(entry),
-            mine: isMyPost(entry),
-            activityTypes,
-            flags: {}
+            hasUnfilledKudosIcon: !!entry.querySelector(UNFILLED_KUDOS_SELECTOR),
+            isMyPost: isMyPost(entry),
+            activityTypes
         };
-        ENTRY_FLAGS.forEach(flag => {
-            state.flags[flag.id] = flag.test(state);
-        });
-        return state;
-    }
-
-    function applyEntryAttributes(entry, flags) {
-        ENTRY_FLAGS.forEach(flag => {
-            if (flags[flag.id]) {
-                entry.setAttribute(flag.attribute, 'true');
-                return;
+        const matches = {};
+        FEED_FILTERS.forEach(filter => {
+            const matchesFilter = filter.hidesEntry(entryDetails);
+            matches[filter.id] = matchesFilter;
+            if (matchesFilter) {
+                entry.setAttribute(filter.hiddenEntryAttribute, 'true');
+            } else {
+                entry.removeAttribute(filter.hiddenEntryAttribute);
             }
-
-            entry.removeAttribute(flag.attribute);
         });
+        filterMatchesByEntry.set(entry, matches);
     }
 
     function clearEntryAttributes(entry) {
-        ENTRY_FLAGS.forEach(flag => entry.removeAttribute(flag.attribute));
+        FEED_FILTERS.forEach(filter => entry.removeAttribute(filter.hiddenEntryAttribute));
     }
 
-    function updateTrackedEntry(entry) {
-        const state = analyzeEntry(entry);
-        trackedEntries.set(entry, state);
-        applyEntryAttributes(entry, state.flags);
+    function recheckTrackedEntries() {
+        for (const entry of filterMatchesByEntry.keys()) {
+            updateTrackedEntry(entry);
+        }
     }
 
     function removeTrackedEntry(entry) {
-        if (!trackedEntries.delete(entry)) {
+        if (!filterMatchesByEntry.delete(entry)) {
             return;
         }
 
@@ -438,58 +368,46 @@
     }
 
     function clearTrackedEntries() {
-        trackedEntries.forEach((_, entry) => clearEntryAttributes(entry));
-        trackedEntries.clear();
-    }
-
-    function indexFeedEntries() {
-        clearTrackedEntries();
-
-        if (!feedContainer) {
-            refreshBadges();
-            return;
+        for (const entry of filterMatchesByEntry.keys()) {
+            clearEntryAttributes(entry);
         }
-
-        feedContainer.querySelectorAll(FEED_ENTRY_SELECTOR).forEach(updateTrackedEntry);
-        refreshBadges();
-        applyStravaButtonClasses();
+        filterMatchesByEntry.clear();
     }
 
-    function collectClosestEntry(node, result) {
-        if (!isElement(node)) {
+    function collectClosestEntry(node, affectedEntries) {
+        if (!(node instanceof Element)) {
             return;
         }
 
         const closestEntry = node.closest(FEED_ENTRY_SELECTOR);
         if (closestEntry) {
-            result.add(closestEntry);
+            affectedEntries.add(closestEntry);
         }
     }
 
-    function collectEntriesFromNode(node, result) {
-        if (!isElement(node)) {
+    function collectEntriesInChangedSubtree(node, affectedEntries) {
+        if (!(node instanceof Element)) {
             return;
         }
 
         if (node.matches(FEED_ENTRY_SELECTOR)) {
-            result.add(node);
+            affectedEntries.add(node);
         }
 
         node.querySelectorAll(FEED_ENTRY_SELECTOR).forEach(entry => {
-            result.add(entry);
+            affectedEntries.add(entry);
         });
 
-        collectClosestEntry(node, result);
+        collectClosestEntry(node, affectedEntries);
     }
 
-    // Feed mutations are processed incrementally instead of rescanning the whole feed.
-    function processFeedMutations(mutations) {
+    function recheckEntriesAffectedByMutations(mutations) {
         const affectedEntries = new Set();
 
         mutations.forEach(mutation => {
             collectClosestEntry(mutation.target, affectedEntries);
-            mutation.addedNodes.forEach(node => collectEntriesFromNode(node, affectedEntries));
-            mutation.removedNodes.forEach(node => collectEntriesFromNode(node, affectedEntries));
+            mutation.addedNodes.forEach(node => collectEntriesInChangedSubtree(node, affectedEntries));
+            mutation.removedNodes.forEach(node => collectEntriesInChangedSubtree(node, affectedEntries));
         });
 
         affectedEntries.forEach(entry => {
@@ -501,33 +419,18 @@
         });
 
         refreshBadges();
-        applyStravaButtonClasses();
+        applyStravaKudosButtonClass();
     }
 
-    function disconnectFeedObserver() {
-        if (feedObserver) {
-            feedObserver.disconnect();
-            feedObserver = null;
-        }
-    }
-
-    function connectFeedObserver() {
-        if (!feedContainer || feedObserver) {
-            return;
-        }
-
-        feedObserver = new MutationObserver(processFeedMutations);
-        feedObserver.observe(feedContainer, { childList: true, subtree: true });
-    }
-
-    function refreshFeedContainer() {
+    function observeCurrentFeedContainer() {
         const nextFeedContainer = document.querySelector(FEED_CONTAINER_SELECTOR);
 
         if (nextFeedContainer === feedContainer) {
             return;
         }
 
-        disconnectFeedObserver();
+        feedObserver?.disconnect();
+        feedObserver = null;
         clearTrackedEntries();
         feedContainer = nextFeedContainer;
 
@@ -536,11 +439,13 @@
             return;
         }
 
-        connectFeedObserver();
-        indexFeedEntries();
+        feedObserver = new MutationObserver(recheckEntriesAffectedByMutations);
+        feedObserver.observe(feedContainer, { childList: true, subtree: true });
+        feedContainer.querySelectorAll(FEED_ENTRY_SELECTOR).forEach(updateTrackedEntry);
+        refreshBadges();
+        applyStravaKudosButtonClass();
     }
 
-    // UI
     function createBadge() {
         const badge = document.createElement('span');
         badge.style.cssText = `
@@ -589,7 +494,21 @@
         return svg;
     }
 
-    function createChevronIcon() {
+    function createCameraIcon() {
+        return createPathIcon(
+            '0 0 24 24',
+            'M12 5c-3.86 0-7 3.14-7 7s3.14 7 7 7 7-3.14 7-7-3.14-7-7-7zm0-2c1.1 0 2 .9 2 2h3.17C18.6 5 19 5.4 19 5.83V7h1c1.1 0 2 .9 2 2v9c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V9c0-1.1.9-2 2-2h1V5.83C5 5.4 5.4 5 5.83 5H9c0-1.1.9-2 2-2zm0 5c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z'
+        );
+    }
+
+    function createFilledKudosIcon() {
+        return createPathIcon(
+            '0 0 16 16',
+            'M14.625 10.96V9.5l.275-.338A1.94 1.94 0 0013.394 6H8.6l.496-4.055A1.735 1.735 0 007.374 0a.578.578 0 00-.527.34l-2.5 5.556a.667.667 0 01-.184.24L1.243 8.55A.667.667 0 001 9.064v3.603C1 13.403 1.597 14 2.333 14h1.468l1.163.776c.219.146.477.224.74.224h6.171A2.125 2.125 0 0014 12.875v-.395l.112-.13c.331-.387.513-.88.513-1.39z'
+        );
+    }
+
+    function createStravaShareChevronIcon() {
         return createPathIcon(
             '0 0 16 16',
             'M14.384 5.5L8.796 11.09c-.44.44-1.152.44-1.591 0L1.616 5.5l.884-.884 5.5 5.5 5.5-5.5z'
@@ -619,7 +538,7 @@
 
         const badge = createBadge();
         button.appendChild(badge);
-        updateButtonStyle(button, filterState[filter.id]);
+        updateButtonStyle(button, isFilterEnabled(filter));
 
         button.addEventListener('click', (event) => {
             event.preventDefault();
@@ -630,9 +549,9 @@
     }
 
     function applyActivityTypeSelection() {
-        trackedEntries.forEach((_, entry) => updateTrackedEntry(entry));
+        recheckTrackedEntries();
         saveHiddenActivityTypes();
-        applyFilterClasses();
+        syncBodyFilterClasses();
         renderActivityTypeMenu();
         syncFilterUi();
     }
@@ -655,12 +574,12 @@
     }
 
     function renderActivityTypeMenu() {
-        const ui = filterUi[ACTIVITY_TYPE_FILTER_ID];
-        if (!ui?.menu) {
+        const menu = filterControls[ACTIVITY_TYPE_FILTER_ID]?.menu;
+        if (!menu) {
             return;
         }
 
-        ui.menu.replaceChildren();
+        menu.replaceChildren();
 
         const header = document.createElement('div');
         header.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:16px; padding:10px 12px 7px;';
@@ -681,7 +600,7 @@
             showAll.addEventListener('click', showAllActivityTypes);
             header.appendChild(showAll);
         }
-        ui.menu.appendChild(header);
+        menu.appendChild(header);
 
         const types = [...activityTypeLabels.entries()]
             .sort((left, right) => left[1].localeCompare(right[1]));
@@ -690,7 +609,7 @@
             const empty = document.createElement('div');
             empty.textContent = 'Types will appear as activities load.';
             empty.style.cssText = 'padding:4px 12px 11px; color:#666; font-size:12px; white-space:nowrap;';
-            ui.menu.appendChild(empty);
+            menu.appendChild(empty);
             return;
         }
 
@@ -711,16 +630,16 @@
             option.appendChild(text);
             list.appendChild(option);
         });
-        ui.menu.appendChild(list);
+        menu.appendChild(list);
     }
 
     function closeActivityTypeMenu() {
-        const ui = filterUi[ACTIVITY_TYPE_FILTER_ID];
-        if (!ui?.menu) {
+        const control = filterControls[ACTIVITY_TYPE_FILTER_ID];
+        if (!control) {
             return;
         }
-        ui.menu.style.display = 'none';
-        ui.button.setAttribute('aria-expanded', 'false');
+        control.menu.style.display = 'none';
+        control.button.setAttribute('aria-expanded', 'false');
     }
 
     function createActivityTypeFilterControl() {
@@ -766,25 +685,9 @@
         root.appendChild(button);
         root.appendChild(menu);
 
-        const ui = { root, button, badge, menu };
-        filterUi[ACTIVITY_TYPE_FILTER_ID] = ui;
-        renderActivityTypeMenu();
-        updateButtonStyle(button, hiddenActivityTypes.size > 0);
-        return ui;
+        return { root, button, badge, menu };
     }
 
-    function switchFeedType(feedTypeId) {
-        if (getCurrentFeedType() === feedTypeId) {
-            return;
-        }
-        const target = FEED_TYPES.find(type => type.id === feedTypeId);
-        if (target) {
-            window.location.href = target.url;
-        }
-    }
-
-    // Copies the computed style from a real Strava nav-link so the toggle inherits the
-    // current theme without hardcoding colors, fonts, or paddings.
     const NAV_LINK_STYLE_PROPERTIES = [
         'color', 'fontSize', 'fontWeight', 'lineHeight', 'fontFamily',
         'padding', 'letterSpacing', 'display', 'alignItems', 'height',
@@ -802,17 +705,17 @@
         return null;
     }
 
-    function applyNavLinkStyleFromComputed(target, computed) {
-        if (!computed) {
+    function copyNavLinkStyle(target, navLinkStyle) {
+        if (!navLinkStyle) {
             return;
         }
-        NAV_LINK_STYLE_PROPERTIES.forEach(prop => {
-            target.style[prop] = computed[prop];
+        NAV_LINK_STYLE_PROPERTIES.forEach(property => {
+            target.style[property] = navLinkStyle[property];
         });
         target.style.textDecoration = 'none';
     }
 
-    function getNavLinkComputedStyle() {
+    function getInactiveNavLinkStyle() {
         const reference = findInactiveNavLink();
         return reference ? getComputedStyle(reference) : null;
     }
@@ -831,7 +734,9 @@
             tab.style.borderBottom = '2px solid transparent';
             tab.addEventListener('click', (event) => {
                 event.preventDefault();
-                switchFeedType(feedType.id);
+                if (feedType.id !== getCurrentFeedType()) {
+                    window.location.assign(feedType.url);
+                }
             });
             container.appendChild(tab);
         });
@@ -842,9 +747,9 @@
 
     function applyFeedTypeToggleState(container) {
         const current = getCurrentFeedType();
-        const navLinkStyle = getNavLinkComputedStyle();
+        const navLinkStyle = getInactiveNavLinkStyle();
         container.querySelectorAll('[data-feed-type]').forEach(tab => {
-            applyNavLinkStyleFromComputed(tab, navLinkStyle);
+            copyNavLinkStyle(tab, navLinkStyle);
             const active = tab.dataset.feedType === current;
             tab.style.borderBottomColor = active ? BUTTON_ACTIVE_COLOR : 'transparent';
             if (active) {
@@ -854,8 +759,13 @@
         });
     }
 
-    function insertButtons(targetForm) {
+    function mountFeedControlsIfNeeded() {
         if (document.getElementById(FILTER_WRAPPER_ID)) {
+            return;
+        }
+
+        const feedSourceForm = document.getElementById(FEED_FILTER_INPUT_ID)?.closest('form');
+        if (!feedSourceForm) {
             return;
         }
 
@@ -863,34 +773,38 @@
         wrapper.id = FILTER_WRAPPER_ID;
         wrapper.style.cssText = 'display:flex; align-items:center; flex-shrink:0; gap:5px;';
 
-        FILTERS.forEach(filter => {
-            filterUi[filter.id] = createFilterButton(filter);
-            wrapper.appendChild(filterUi[filter.id].button);
-            if (filter.id === 'virtual') {
-                wrapper.appendChild(createActivityTypeFilterControl().root);
+        FEED_FILTERS.forEach(filter => {
+            if (filter.id === ACTIVITY_TYPE_FILTER_ID) {
+                const control = createActivityTypeFilterControl();
+                filterControls[filter.id] = control;
+                wrapper.appendChild(control.root);
+                renderActivityTypeMenu();
+                return;
             }
+            const control = createFilterButton(filter);
+            filterControls[filter.id] = control;
+            wrapper.appendChild(control.button);
         });
 
         const controlsRow = document.createElement('div');
         controlsRow.id = FILTER_CONTROL_ROW_ID;
         controlsRow.style.cssText = 'display:flex; align-items:center; flex-wrap:nowrap; gap:32px; width:max-content; max-width:100%;';
 
-        // Group feed-source controls so they read as one unit, with a bigger gap before filters.
-        const feedGroup = document.createElement('div');
-        feedGroup.style.cssText = 'display:flex; align-items:center; gap:6px; flex-shrink:0;';
+        const feedSourceControls = document.createElement('div');
+        feedSourceControls.style.cssText = 'display:flex; align-items:center; gap:6px; flex-shrink:0;';
 
-        targetForm.style.flexShrink = '0';
-        targetForm.style.display = 'none';
-        targetForm.parentNode.insertBefore(controlsRow, targetForm);
-        feedGroup.appendChild(createFeedTypeToggle());
-        feedGroup.appendChild(createDropdownReveal(targetForm));
-        feedGroup.appendChild(targetForm);
-        controlsRow.appendChild(feedGroup);
+        feedSourceForm.style.flexShrink = '0';
+        feedSourceForm.style.display = 'none';
+        feedSourceForm.parentNode.insertBefore(controlsRow, feedSourceForm);
+        feedSourceControls.appendChild(createFeedTypeToggle());
+        feedSourceControls.appendChild(createFeedSourceDropdownButton(feedSourceForm));
+        feedSourceControls.appendChild(feedSourceForm);
+        controlsRow.appendChild(feedSourceControls);
         controlsRow.appendChild(wrapper);
         syncFilterUi();
     }
 
-    function createDropdownReveal(targetForm) {
+    function createFeedSourceDropdownButton(feedSourceForm) {
         const button = document.createElement('button');
         button.id = DROPDOWN_REVEAL_ID;
         button.type = 'button';
@@ -902,103 +816,73 @@
             padding:2px 4px; line-height:0; flex-shrink:0;
             display:inline-flex; align-items:center; justify-content:center;
         `;
-        // 16x16 chevron path used by Strava's entry share menus — sized right for our row.
-        button.appendChild(createChevronIcon());
+        button.appendChild(createStravaShareChevronIcon());
         button.addEventListener('click', (event) => {
             event.preventDefault();
-            const hidden = targetForm.style.display === 'none';
-            targetForm.style.display = hidden ? '' : 'none';
-            button.setAttribute('aria-expanded', String(hidden));
+            const opening = feedSourceForm.style.display === 'none';
+            feedSourceForm.style.display = opening ? '' : 'none';
+            button.setAttribute('aria-expanded', String(opening));
         });
         return button;
     }
 
-    function findFilterForm() {
-        return document.getElementById(FEED_FILTER_INPUT_ID)?.closest('form') || null;
-    }
-
-    function mountFilterButtonsIfNeeded() {
-        const filterForm = findFilterForm();
-        if (filterForm) {
-            insertButtons(filterForm);
-        }
-    }
-
-    // Adopt the same className Strava uses on entry kudos buttons so our controls
-    // inherit native hover/focus/active treatments.
-    function applyStravaButtonClasses() {
-        if (!stravaButtonClass) {
-            const reference = document.querySelector('[data-testid="kudos_button"]');
-            if (!reference) {
+    function applyStravaKudosButtonClass() {
+        if (!stravaKudosButtonClass) {
+            const kudosButton = document.querySelector('[data-testid="kudos_button"]');
+            if (!kudosButton) {
                 return;
             }
-            stravaButtonClass = reference.className;
+            stravaKudosButtonClass = kudosButton.className;
         }
-        document.querySelectorAll(`#${FILTER_WRAPPER_ID} [data-strava-filter-control="true"]`).forEach(btn => {
-            if (btn.dataset.stravaClassApplied !== 'true') {
-                btn.className = stravaButtonClass;
-                btn.dataset.stravaClassApplied = 'true';
+        document.querySelectorAll(`#${FILTER_WRAPPER_ID} [data-strava-filter-control="true"]`).forEach(button => {
+            if (button.dataset.stravaClassApplied !== 'true') {
+                button.className = stravaKudosButtonClass;
+                button.dataset.stravaClassApplied = 'true';
             }
         });
         const reveal = document.getElementById(DROPDOWN_REVEAL_ID);
         if (reveal && reveal.dataset.stravaClassApplied !== 'true') {
-            reveal.className = stravaButtonClass;
+            reveal.className = stravaKudosButtonClass;
             reveal.dataset.stravaClassApplied = 'true';
         }
     }
 
-    function restyleGiftLink() {
-        const navLinkStyle = getNavLinkComputedStyle();
-        document.querySelectorAll(UNSTYLED_GIFT_LINK_SELECTOR).forEach(link => {
+    function styleGiftLinksAsNavLinks() {
+        const unstyledGiftLinks = document.querySelectorAll(UNSTYLED_GIFT_LINK_SELECTOR);
+        if (unstyledGiftLinks.length === 0) {
+            return;
+        }
+
+        const navLinkStyle = getInactiveNavLinkStyle();
+        unstyledGiftLinks.forEach(link => {
             link.classList.remove('btn', 'btn-sm', 'btn-primary', 'experiment');
             link.classList.add('nav-link');
-            applyNavLinkStyleFromComputed(link, navLinkStyle);
+            copyNavLinkStyle(link, navLinkStyle);
         });
     }
 
-    // Bootstrap
-    // The feed mutates on every scroll, so the root observer inspects no mutation records
-    // at all: it coalesces a batch into one animation frame and re-checks the handful of
-    // things we hook into with cheap document-level lookups.
-    function scheduleRootCheck() {
-        if (rootCheckScheduled) {
+    function scheduleDashboardRefresh() {
+        if (dashboardRefreshScheduled) {
             return;
         }
 
-        rootCheckScheduled = true;
-        requestAnimationFrame(runRootCheck);
+        dashboardRefreshScheduled = true;
+        requestAnimationFrame(refreshDashboardAfterDomChange);
     }
 
-    function runRootCheck() {
-        rootCheckScheduled = false;
+    function refreshDashboardAfterDomChange() {
+        dashboardRefreshScheduled = false;
+        mountFeedControlsIfNeeded();
+        styleGiftLinksAsNavLinks();
 
-        if (!document.getElementById(FILTER_WRAPPER_ID)) {
-            mountFilterButtonsIfNeeded();
-        }
-        // Restyling drops btn-primary, so a gift link matches here at most once.
-        if (document.querySelector(UNSTYLED_GIFT_LINK_SELECTOR)) {
-            restyleGiftLink();
-        }
-
-        const idJustResolved = resolveMyAthleteIdIfPossible();
-        // Returns immediately unless Strava swapped the feed container out from under us.
-        refreshFeedContainer();
-        if (idJustResolved) {
-            trackedEntries.forEach((_, entry) => updateTrackedEntry(entry));
+        const previousAthleteId = myAthleteId;
+        myAthleteId ??= findMyAthleteIdInHeader();
+        observeCurrentFeedContainer();
+        if (myAthleteId !== previousAthleteId) {
+            recheckTrackedEntries();
             refreshBadges();
         }
-        // A few classList.toggle calls, and they restore our state if Strava rewrites
-        // body's className.
-        applyFilterClasses();
-    }
-
-    function startRootObserver() {
-        if (rootObserver) {
-            return;
-        }
-
-        rootObserver = new MutationObserver(scheduleRootCheck);
-        rootObserver.observe(document.body, { childList: true, subtree: true });
+        syncBodyFilterClasses();
     }
 
     function syncFeedTypeToggle() {
@@ -1008,26 +892,23 @@
         }
     }
 
-    function handleLocationChange() {
-        applyFilterClasses();
+    function syncFiltersAfterFeedNavigation() {
+        syncBodyFilterClasses();
         refreshBadges();
         syncFeedTypeToggle();
     }
 
-    // Runs at document-idle, so the body is already parsed.
     function initialize() {
-        loadFilterState();
-        ensureStyles();
-        applyFilterClasses();
-        mountFilterButtonsIfNeeded();
-        restyleGiftLink();
-        resolveMyAthleteIdIfPossible();
-        refreshFeedContainer();
-        startRootObserver();
+        loadFilterPreferences();
+        installFilterStyles();
+        syncBodyFilterClasses();
+        mountFeedControlsIfNeeded();
+        styleGiftLinksAsNavLinks();
+        myAthleteId = findMyAthleteIdInHeader();
+        observeCurrentFeedContainer();
+        new MutationObserver(scheduleDashboardRefresh).observe(document.body, { childList: true, subtree: true });
         syncFilterUi();
-        // Strava swaps feeds through same-document navigations without a reload; the
-        // Navigation API reports every one of them, including pushState and back/forward.
-        navigation.addEventListener('currententrychange', handleLocationChange);
+        navigation.addEventListener('currententrychange', syncFiltersAfterFeedNavigation);
         document.addEventListener('click', closeActivityTypeMenu);
         document.addEventListener('keydown', event => {
             if (event.key === 'Escape') {
