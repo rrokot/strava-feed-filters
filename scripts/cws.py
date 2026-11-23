@@ -3,7 +3,7 @@
 
 Runs in the Release workflow, which supplies CWS_ACCESS_TOKEN (a short-lived token
 of the publisher's service account, issued through Workload Identity Federation)
-and CWS_PUBLISHER_ID; see docs/releasing.md.
+and CWS_PUBLISHER_ID.
 """
 import argparse
 import json
