@@ -38,10 +38,27 @@
     const ATHLETE_HREF_PATTERN = /\/athletes\/(\d+)/;
     const ACTIVITY_TYPE_FILTER_ID = 'activityType';
     const ACTIVITY_TYPE_STORAGE_KEY = 'stravaHiddenActivityTypes';
-    const BUTTON_ACTIVE_COLOR = '#fc5200';
-    const BUTTON_INACTIVE_COLOR = '#888';
-    const FEED_TAB_ACTIVE_COLOR = '#000';
-    const FEED_TAB_INACTIVE_COLOR = '#43423f';
+    // Strava's design tokens (CSS custom properties on :root); the second value
+    // is what the token held when this was written, in case it disappears.
+    const STRAVA_ORANGE = 'var(--color-coreo3, #fc5200)';
+    const STRAVA_BLACK = 'var(--color-coreasphalt, #000)';
+    const STRAVA_TEXT = 'var(--color-extendedneutraln1, #21211f)';
+    const STRAVA_TEXT_SECONDARY = 'var(--color-extendedneutraln2, #43423f)';
+    const STRAVA_TEXT_MUTED = 'var(--color-extendedneutraln3, #64635e)';
+    const STRAVA_ICON_INACTIVE = 'var(--color-extendedneutraln4, #918e89)';
+    const STRAVA_BORDER = 'var(--color-extendedneutraln5, #e0e0de)';
+    const STRAVA_RADIUS = 'var(--border-radius-sm, 4px)';
+    const BUTTON_ACTIVE_COLOR = STRAVA_ORANGE;
+    const BUTTON_INACTIVE_COLOR = STRAVA_ICON_INACTIVE;
+    const FEED_TAB_ACTIVE_COLOR = STRAVA_BLACK;
+    const FEED_TAB_INACTIVE_COLOR = STRAVA_TEXT_SECONDARY;
+    // Look, cursor and centering come from the Strava button class borrowed in
+    // applyStravaKudosButtonClass; this only makes the buttons small and borderless.
+    const FILTER_BUTTON_STYLE = `
+        position:relative;
+        width:28px; height:28px; padding:4px;
+        border:none; line-height:1;
+    `;
     const ACTIVITY_TYPE_MENU_ROWS_PER_COLUMN = 12;
     const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
@@ -528,7 +545,7 @@
             position: absolute;
             top: 0;
             right: 0;
-            color: #000;
+            color: ${STRAVA_BLACK};
             font-size: 10px;
             font-weight: 700;
             line-height: 1;
@@ -603,13 +620,7 @@
         button.type = 'button';
         button.title = filter.title;
         button.dataset.stravaFilterControl = 'true';
-        button.style.cssText = `
-            position: relative;
-            width: 28px; height: 28px; padding: 4px;
-            border: none; cursor: pointer;
-            display: inline-flex; align-items: center; justify-content: center;
-            line-height: 1; white-space: nowrap;
-        `;
+        button.style.cssText = FILTER_BUTTON_STYLE;
         button.appendChild(filter.iconFactory());
 
         const badge = createBadge();
@@ -684,7 +695,7 @@
         if (types.length === 0) {
             const empty = document.createElement('div');
             empty.textContent = 'Types will appear as activities load.';
-            empty.style.cssText = 'padding:4px 12px 11px; color:#666; font-size:12px; white-space:nowrap;';
+            empty.style.cssText = `padding:4px 12px 11px; color:${STRAVA_TEXT_MUTED}; font-size:12px; white-space:nowrap;`;
             menu.appendChild(empty);
             return;
         }
@@ -737,13 +748,7 @@
         button.dataset.stravaFilterControl = 'true';
         button.setAttribute('aria-haspopup', 'menu');
         button.setAttribute('aria-expanded', 'false');
-        button.style.cssText = `
-            position:relative;
-            width:28px; height:28px; padding:4px;
-            border:none; cursor:pointer;
-            display:inline-flex; align-items:center; justify-content:center;
-            line-height:1; white-space:nowrap;
-        `;
+        button.style.cssText = FILTER_BUTTON_STYLE;
         button.appendChild(createFunnelIcon());
 
         const badge = createBadge();
@@ -754,9 +759,9 @@
         menu.style.cssText = `
             position:absolute; top:34px; right:0; z-index:1000;
             display:none; min-width:190px;
-            color:#242428; background:#fff;
-            border:1px solid #d8d8d8; border-radius:4px;
-            box-shadow:0 4px 14px rgba(0,0,0,.18);
+            color:${STRAVA_TEXT}; background:var(--color-corewhite, #fff);
+            border:1px solid ${STRAVA_BORDER}; border-radius:${STRAVA_RADIUS};
+            box-shadow:0 6px 10px rgba(0,0,0,.05);
         `;
 
         button.addEventListener('click', (event) => {
@@ -861,11 +866,7 @@
         button.title = 'Show more feed sources';
         button.setAttribute('aria-haspopup', 'menu');
         button.setAttribute('aria-expanded', 'false');
-        button.style.cssText = `
-            border:none; cursor:pointer;
-            padding:2px 4px; line-height:0; flex-shrink:0;
-            display:inline-flex; align-items:center; justify-content:center;
-        `;
+        button.style.cssText = 'border:none; padding:2px 4px; line-height:0; flex-shrink:0;';
         button.appendChild(createChevronDownIcon());
         button.addEventListener('click', (event) => {
             event.preventDefault();
