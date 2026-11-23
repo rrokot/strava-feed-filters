@@ -24,6 +24,10 @@
     const DROPDOWN_REVEAL_ID = 'strava-feed-dropdown-reveal';
     const STYLE_ELEMENT_ID = 'strava-feed-filter-styles';
     const MEDIA_SELECTOR = '[data-testid="photo"], [data-testid="video"]';
+    // Strava renders its own generated pictures (e.g. the weight-training muscle
+    // heatmap) as "photo" too; they come from sport-image.strava.com, while real
+    // uploads come from CloudFront.
+    const GENERATED_IMAGE_SELECTOR = 'img[src*="//sport-image.strava.com/"]';
     const ACTIVITY_TAG_SELECTOR = '[data-testid="tag"]';
     const ACTIVITY_TYPE_TITLE_SELECTOR = 'svg[data-testid="activity-icon"] title';
     const UNFILLED_KUDOS_SELECTOR = 'svg[data-testid="unfilled_kudos"]';
@@ -35,6 +39,8 @@
     const ACTIVITY_TYPE_STORAGE_KEY = 'stravaHiddenActivityTypes';
     const BUTTON_ACTIVE_COLOR = '#fc5200';
     const BUTTON_INACTIVE_COLOR = '#888';
+    const FEED_TAB_INACTIVE_COLOR = '#43423f';
+    const ACTIVITY_TYPE_MENU_ROWS_PER_COLUMN = 12;
     const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
     const FOLLOWING_FEED = 'following';
@@ -165,11 +171,12 @@
         try {
             const savedTypes = JSON.parse(readStoredPreference(ACTIVITY_TYPE_STORAGE_KEY) || '[]');
             if (Array.isArray(savedTypes)) {
-                savedTypes.forEach(label => {
+                savedTypes.forEach(savedLabel => {
+                    const label = humanizeActivityType(String(savedLabel));
                     const normalized = normalizeText(label);
                     if (normalized) {
                         hiddenActivityTypes.add(normalized);
-                        activityTypeLabels.set(normalized, String(label).trim());
+                        activityTypeLabels.set(normalized, label);
                     }
                 });
             }
@@ -302,6 +309,11 @@
         return (value || '').trim().toLowerCase();
     }
 
+    function hasUploadedMedia(entry) {
+        return [...entry.querySelectorAll(MEDIA_SELECTOR)]
+            .some(media => !media.querySelector(GENERATED_IMAGE_SELECTOR));
+    }
+
     function isMyPost(entry) {
         if (!myAthleteId) {
             return false;
@@ -310,10 +322,54 @@
         return extractAthleteId(ownerLink?.getAttribute('href')) === myAthleteId;
     }
 
+    // Strava sometimes ships untranslated icon titles such as
+    // "strava.activities.types_v2.mountainbikeride". The translations still sit
+    // in the page's i18n store under views.activity_types, keyed by the same
+    // suffix, so look them up there in the viewer's language.
+    const UNTRANSLATED_ACTIVITY_TYPE_PATTERN = /^strava\.activities\.types(?:_v\d+)?\.([a-z0-9_]+)$/i;
+    let pageActivityTypeLabels;
+
+    function getPageActivityTypeLabels() {
+        if (pageActivityTypeLabels !== undefined) {
+            return pageActivityTypeLabels;
+        }
+        pageActivityTypeLabels = null;
+        try {
+            const store = window.__NEXT_DATA__?.props?.initialI18nStore;
+            if (store && typeof store === 'object') {
+                const lang = document.documentElement.lang;
+                const locales = [lang, lang?.split('-')[0], ...Object.keys(store)];
+                for (const locale of locales) {
+                    const labels = locale && store[locale]?.views?.activity_types;
+                    if (labels && typeof labels === 'object') {
+                        pageActivityTypeLabels = labels;
+                        break;
+                    }
+                }
+            }
+        } catch {
+            // Fall back to showing the raw type key.
+        }
+        return pageActivityTypeLabels;
+    }
+
+    function humanizeActivityType(value) {
+        const label = (value || '').trim();
+        const match = label.match(UNTRANSLATED_ACTIVITY_TYPE_PATTERN);
+        if (!match) {
+            return label;
+        }
+        const pageLabel = getPageActivityTypeLabels()?.[match[1].toLowerCase()];
+        if (typeof pageLabel === 'string' && pageLabel.trim()) {
+            return pageLabel.trim();
+        }
+        return match[1].replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+    }
+
     function getActivityTypes(entry) {
         const types = new Map();
         entry.querySelectorAll(ACTIVITY_TYPE_TITLE_SELECTOR).forEach(title => {
-            const label = (title.textContent || '').trim();
+            const label = humanizeActivityType(title.textContent);
             const key = normalizeText(label);
             if (key) {
                 types.set(key, label);
@@ -344,7 +400,7 @@
         registerActivityTypes(activityTypes);
 
         const entryDetails = {
-            hasMedia: !!entry.querySelector(MEDIA_SELECTOR),
+            hasMedia: hasUploadedMedia(entry),
             isVirtual: isVirtualActivity(entry),
             hasUnfilledKudosIcon: !!entry.querySelector(UNFILLED_KUDOS_SELECTOR),
             isMyPost: isMyPost(entry),
@@ -596,7 +652,7 @@
         menu.replaceChildren();
 
         const header = document.createElement('div');
-        header.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:16px; padding:10px 12px 7px;';
+        header.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 12px 4px;';
 
         const heading = document.createElement('strong');
         heading.textContent = 'Activity types';
@@ -627,14 +683,23 @@
             return;
         }
 
+        // Fit every type without scrolling: dense rows, and extra columns
+        // (filled top to bottom, so the order stays alphabetical) as the list grows.
+        const columns = Math.ceil(types.length / ACTIVITY_TYPE_MENU_ROWS_PER_COLUMN);
+        const rows = Math.ceil(types.length / columns);
         const list = document.createElement('div');
-        list.style.cssText = 'padding:0 6px 7px; max-height:280px; overflow-y:auto;';
+        list.style.cssText = `
+            display:grid; grid-auto-flow:column; column-gap:12px;
+            grid-template-rows:repeat(${rows}, auto);
+            padding:0 6px 6px;
+        `;
         types.forEach(([type, label]) => {
             const option = document.createElement('label');
-            option.style.cssText = 'display:flex; align-items:center; gap:8px; padding:6px; cursor:pointer; font-size:13px; white-space:nowrap;';
+            option.style.cssText = 'display:flex; align-items:center; gap:6px; padding:2px 6px; cursor:pointer; font-size:12px; line-height:16px; white-space:nowrap;';
 
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
+            checkbox.style.cssText = 'margin:0; width:13px; height:13px; flex-shrink:0;';
             checkbox.checked = !hiddenActivityTypes.has(type);
             checkbox.addEventListener('change', () => setActivityTypeVisible(type, checkbox.checked));
 
@@ -766,10 +831,11 @@
             copyNavLinkStyle(tab, navLinkStyle);
             const active = tab.dataset.feedType === current;
             tab.style.borderBottomColor = active ? BUTTON_ACTIVE_COLOR : 'transparent';
-            if (active) {
-                tab.style.fontWeight = '700';
-                tab.style.color = '#000';
-            }
+            tab.style.textDecoration = 'none';
+            // Strava's header no longer always has a .nav-link to copy from;
+            // without one the tab would keep the browser's blue link color.
+            tab.style.fontWeight = active ? '700' : (navLinkStyle?.fontWeight || '400');
+            tab.style.color = active ? '#000' : (navLinkStyle?.color || FEED_TAB_INACTIVE_COLOR);
         });
     }
 
