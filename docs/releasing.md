@@ -1,16 +1,21 @@
 # Releasing
 
 ```sh
-python release.py patch   # or minor / major: bumps, regenerates, commits and tags
+python scripts/release.py patch   # or minor / major: checks, bumps, regenerates, commits and tags
 git push --follow-tags
 ```
 
-The version lives only in the userscript's `// @version` line; `package-extension.py`
+The version lives only in the userscript's `// @version` line; `scripts/build.py`
 copies it into `strava-photo-filter-toggle.meta.js` and `extension/manifest.json`.
 
+`release.py` first runs `scripts/check.py` (the userscript parses, the generated files
+are current, `web-ext lint` passes), so a broken build is caught before it is tagged.
+
 Pushing to `main` updates Tampermonkey users right away: they poll the `.meta.js` stub
-on `main`. The `v*` tag starts the Release workflow, which checks that the tag matches
-the userscript version, packages and lints the extension, and then:
+on `main`.
+
+The `v*` tag starts the Release workflow, which checks that the tag matches
+the userscript version, runs the same checks, and then:
 
 - creates a GitHub release with the store zip and the userscript;
 - uploads the zip to the Chrome Web Store and submits it for review;
@@ -26,7 +31,7 @@ Federation: GitHub's OIDC token is exchanged for a short-lived access token, so 
 or refresh tokens are stored anywhere. The Google Cloud project, the service account and
 the `github` Workload Identity pool are shared with the publisher's other extensions and
 are described in
-[bechdeltest-enhanced](https://github.com/rrokot/bechdeltest-enhanced/blob/main/docs/releasing.md#chrome-web-store-access).
+[bechdel-test-for-movie-sites](https://github.com/rrokot/bechdel-test-for-movie-sites/blob/main/docs/releasing.md#chrome-web-store-access).
 This repository only needs to be allowed to impersonate the service account:
 
 ```sh
@@ -35,22 +40,22 @@ gcloud iam service-accounts add-iam-policy-binding SERVICE_ACCOUNT_EMAIL \
   --member=principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/rrokot/strava-feed-filters
 ```
 
-`python cws.py status` run locally mints its token with `gcloud` by impersonating the
-same service account, which needs `roles/iam.serviceAccountTokenCreator` on it for your
-own Google account. It reads `CWS_SERVICE_ACCOUNT` and `CWS_PUBLISHER_ID` from the
-environment or from `.env`.
+The workflow passes the token and the publisher ID to `scripts/cws.py`, which uploads
+the zip and submits it for review. Review status is on the Developer Dashboard.
 
 ## Firefox Add-ons access
 
 `web-ext sign` authenticates with an AMO API key pair from
-https://addons.mozilla.org/en-US/developers/addon/api/key/. `python amo.py show` and
-`set-links` use the same pair from `.env`.
+https://addons.mozilla.org/en-US/developers/addon/api/key/. AMO has no keyless option, so
+this pair is the project's only long-lived secret and is kept only in the
+`firefox-add-ons` environment; regenerate it there if it may have leaked. Review status
+is on the Developer Hub.
 
 ## Secrets
 
 Each store job reads its secrets from its own GitHub environment (**Settings →
 Environments**), so no other job can see them. Both environments accept deployments
-only from `v*` tags.
+only from `v*` tags. Nothing is kept locally: the store scripts run only in CI.
 
 | Environment | Secret | Value |
 | --- | --- | --- |

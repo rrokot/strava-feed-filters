@@ -19,17 +19,13 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Check the userscript parses
-        run: node --check strava-photo-filter-toggle.user.js
+      - name: Check the userscript, regenerate the derived files and lint the extension
+        run: python scripts/check.py
 
-      - name: Regenerate files from the userscript and package the extension
-        run: python package-extension.py
-
+      # The userscript is the source of truth; a diff here means someone edited a
+      # generated file or forgot to run scripts/build.py.
       - name: Verify the committed generated files are current
         run: git diff --exit-code
-
-      - name: Lint the extension for the add-on stores
-        run: npx --yes web-ext@10.8.0 lint --source-dir=extension
 
       - uses: actions/upload-artifact@v7
         with:

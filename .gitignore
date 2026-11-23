@@ -21,5 +21,5 @@ apk/
 build/
 local.properties
 
-# Store API settings (read by amo.py and cws.py)
+# Local secrets never belong in the repo
 .env

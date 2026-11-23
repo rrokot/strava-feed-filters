@@ -1,52 +1,31 @@
 #!/usr/bin/env python3
+"""Upload the packaged extension to the Chrome Web Store and submit it for review.
+
+Runs in the Release workflow, which supplies CWS_ACCESS_TOKEN (a short-lived token
+of the publisher's service account, issued through Workload Identity Federation)
+and CWS_PUBLISHER_ID; see docs/releasing.md.
+"""
 import argparse
 import json
-import os
-import shutil
-import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+from project import required_env
 
-ROOT = Path(__file__).resolve().parent
-ENV_PATH = ROOT / ".env"
 
 EXTENSION_ID = "jdefobolefeekjbgaclabbcffmebamdo"
 API = "https://chromewebstore.googleapis.com"
-SCOPE = "https://www.googleapis.com/auth/chromewebstore"
 UPLOAD_POLL_INTERVAL_SECONDS = 5
 MAX_UPLOAD_STATUS_POLLS = 60
 
 
-def setting(name: str) -> str:
-    if value := os.environ.get(name):
-        return value
-    if ENV_PATH.exists():
-        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-            key, sep, value = line.partition("=")
-            if sep and key.strip() == name:
-                return value.strip().strip("\"'")
-    sys.exit(f"Set {name} in the environment or in {ENV_PATH}")
-
-
-def get_store_access_token() -> str:
-    if token := os.environ.get("CWS_ACCESS_TOKEN"):
-        return token
-    gcloud = shutil.which("gcloud")
-    if gcloud is None:
-        sys.exit("Set CWS_ACCESS_TOKEN or install the gcloud CLI")
-    command = [gcloud, "auth", "print-access-token",
-               f"--impersonate-service-account={setting('CWS_SERVICE_ACCOUNT')}", f"--scopes={SCOPE}"]
-    return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
-
-
 class StoreItem:
     def __init__(self) -> None:
-        self.path = f"publishers/{setting('CWS_PUBLISHER_ID')}/items/{EXTENSION_ID}"
-        self.token = get_store_access_token()
+        self.path = f"publishers/{required_env('CWS_PUBLISHER_ID')}/items/{EXTENSION_ID}"
+        self.token = required_env("CWS_ACCESS_TOKEN")
 
     def call(self, action: str, method: str = "GET", body: bytes | None = None,
              content_type: str | None = None, upload: bool = False) -> dict:
@@ -60,21 +39,6 @@ class StoreItem:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             sys.exit(f"{method} {url} failed: HTTP {error.code} {error.read().decode(errors='replace')}")
-
-
-def describe_revision(revision: dict | None) -> str:
-    if not revision:
-        return "none"
-    versions = ", ".join(channel.get("crxVersion", "?") for channel in revision.get("distributionChannels", []))
-    return f"{versions or '?'} ({revision.get('state')})"
-
-
-def status(item: StoreItem) -> None:
-    result = item.call("fetchStatus")
-    print(f"published: {describe_revision(result.get('publishedItemRevisionStatus'))}")
-    print(f"submitted: {describe_revision(result.get('submittedItemRevisionStatus'))}")
-    if "lastAsyncUploadState" in result:
-        print(f"last upload: {result['lastAsyncUploadState']}")
 
 
 def publish(item: StoreItem, zip_path: Path) -> None:
@@ -99,16 +63,10 @@ def publish(item: StoreItem, zip_path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Publish the extension to the Chrome Web Store.")
-    commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("status")
-    commands.add_parser("publish").add_argument("zip", type=Path)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("zip", type=Path, help="the store zip built by scripts/build.py")
     args = parser.parse_args()
-    item = StoreItem()
-    if args.command == "status":
-        status(item)
-    else:
-        publish(item, args.zip)
+    publish(StoreItem(), args.zip)
 
 
 if __name__ == "__main__":
