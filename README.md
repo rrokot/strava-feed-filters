@@ -1,20 +1,20 @@
 # Strava Feed Filters
 
-Tampermonkey userscript for Strava that filters the feed by activity type and hides posts without photos or videos, virtual activities, posts you already liked, and your own posts. Adds a Following / My Activity toggle.
+Browser extension and Tampermonkey userscript for the Strava dashboard feed. Filters the feed by activity type and hides posts without photos or videos, virtual activities, posts you already gave kudos to, and your own posts. Adds a Following / My Activity toggle.
 
-![Screenshot](./Screenshot.png)
+<img src="./Screenshot.png" alt="Screenshot" width="556">
 
 ## Controls
 
-- **Following / My Activity** tabs: quick feed-type switch (replaces the native dropdown for the two common feeds)
+- **Following / My Activity** tabs: switch between the two common feeds (replaces Strava's feed dropdown)
 - `▾` next to the tabs: reveals Strava's original dropdown for clubs and other feed sources
-- Camera: hides posts without photos or videos
+- Camera: hides posts without uploaded photos or videos; pictures Strava generates itself, such as the weight-training muscle heatmap, don't count. On by default
 - `VR`: hides virtual activities
-- Funnel: opens the activity-type menu; checked types remain visible and unchecked types are hidden
-- Heart: hides posts you already liked
+- Funnel: opens the activity-type menu; unchecked types are hidden. A post is hidden only when all of its activity types are unchecked. The menu lists the types found in the loaded feed
+- Thumbs-up: hides posts you already gave kudos to
 - `ME`: hides your own posts
 
-Orange is on; badges show hidden counts. Activity-type choices are saved in the browser and newly encountered types are enabled by default. The "already liked" and "your own" filters are automatically suppressed on the My Activity feed (where they would hide everything).
+An orange button is on; its badge counts the loaded posts it hides. The kudos and `ME` filters are off on the My Activity feed, where they would hide everything. All choices are saved in the browser, and activity types you haven't seen before are shown.
 
 ## Installation
 
