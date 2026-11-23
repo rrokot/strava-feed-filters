@@ -17,7 +17,7 @@
 
     const FEED_CONTAINER_SELECTOR = '.feature-feed';
     const FEED_ENTRY_SELECTOR = '[data-testid="web-feed-entry"]';
-    const FEED_FILTER_INPUT_ID = 'feedFilter';
+    const FEED_SOURCE_INPUT_ID = 'feedFilter';
     const FILTER_WRAPPER_ID = 'strava-feed-filter-toggles';
     const FILTER_CONTROL_ROW_ID = 'strava-feed-filter-controls-row';
     const FEED_TYPE_TOGGLE_ID = 'strava-feed-type-toggle';
@@ -33,12 +33,14 @@
     const UNFILLED_KUDOS_SELECTOR = 'svg[data-testid="unfilled_kudos"]';
     const OWNER_LINK_SELECTOR = '[data-testid="owners-name"], [data-testid="owner-avatar"]';
     const HEADER_ATHLETE_LINK_SELECTOR = 'header a[href*="/athletes/"], nav a[href*="/athletes/"]';
-    const UNSTYLED_GIFT_LINK_SELECTOR = 'a[href*="/gift"].btn-primary';
+    // Strava's "Give a Gift" promo in the header: keep the link, drop its icon.
+    const GIFT_PROMO_ICON_SELECTOR = 'a[href*="/gift"] img';
     const ATHLETE_HREF_PATTERN = /\/athletes\/(\d+)/;
     const ACTIVITY_TYPE_FILTER_ID = 'activityType';
     const ACTIVITY_TYPE_STORAGE_KEY = 'stravaHiddenActivityTypes';
     const BUTTON_ACTIVE_COLOR = '#fc5200';
     const BUTTON_INACTIVE_COLOR = '#888';
+    const FEED_TAB_ACTIVE_COLOR = '#000';
     const FEED_TAB_INACTIVE_COLOR = '#43423f';
     const ACTIVITY_TYPE_MENU_ROWS_PER_COLUMN = 12;
     const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -50,6 +52,10 @@
         { id: MY_ACTIVITY_FEED, label: 'My Activity', url: `/dashboard?feed_type=${MY_ACTIVITY_FEED}` }
     ];
 
+    // updateTrackedEntry tags each feed entry with hiddenEntryAttribute when a
+    // filter would hide it; the CSS hides tagged entries only while the filter's
+    // activeBodyClass is on <body>. Turning a filter on or off flips one class
+    // and never rescans the feed.
     const FEED_FILTERS = [
         {
             id: 'photo',
@@ -85,7 +91,7 @@
             disabledOnMyActivityFeed: true,
             hiddenEntryAttribute: 'data-strava-liked-entry',
             activeBodyClass: 'strava-show-unliked',
-            hidesEntry: entry => !entry.hasUnfilledKudosIcon,
+            hidesEntry: entry => !entry.canStillGiveKudos,
             iconFactory: createFilledKudosIcon
         },
         {
@@ -130,7 +136,7 @@
         style.textContent = `
             ${hideRules}
 
-            a[href*="/gift"] img {
+            ${GIFT_PROMO_ICON_SELECTOR} {
                 display: none !important;
             }
         `;
@@ -402,7 +408,7 @@
         const entryDetails = {
             hasMedia: hasUploadedMedia(entry),
             isVirtual: isVirtualActivity(entry),
-            hasUnfilledKudosIcon: !!entry.querySelector(UNFILLED_KUDOS_SELECTOR),
+            canStillGiveKudos: !!entry.querySelector(UNFILLED_KUDOS_SELECTOR),
             isMyPost: isMyPost(entry),
             activityTypes
         };
@@ -578,7 +584,7 @@
         );
     }
 
-    function createStravaShareChevronIcon() {
+    function createChevronDownIcon() {
         return createPathIcon(
             '0 0 16 16',
             'M14.384 5.5L8.796 11.09c-.44.44-1.152.44-1.591 0L1.616 5.5l.884-.884 5.5 5.5 5.5-5.5z'
@@ -767,38 +773,6 @@
         return { root, button, badge, menu };
     }
 
-    const NAV_LINK_STYLE_PROPERTIES = [
-        'color', 'fontSize', 'fontWeight', 'lineHeight', 'fontFamily',
-        'padding', 'letterSpacing', 'display', 'alignItems', 'height',
-        'textTransform'
-    ];
-
-    function findInactiveNavLink() {
-        const currentPath = window.location.pathname;
-        const links = document.querySelectorAll('.global-nav a.nav-link, .nav-bar a.nav-link');
-        for (const link of links) {
-            if (link.pathname && link.pathname !== currentPath) {
-                return link;
-            }
-        }
-        return null;
-    }
-
-    function copyNavLinkStyle(target, navLinkStyle) {
-        if (!navLinkStyle) {
-            return;
-        }
-        NAV_LINK_STYLE_PROPERTIES.forEach(property => {
-            target.style[property] = navLinkStyle[property];
-        });
-        target.style.textDecoration = 'none';
-    }
-
-    function getInactiveNavLinkStyle() {
-        const reference = findInactiveNavLink();
-        return reference ? getComputedStyle(reference) : null;
-    }
-
     function createFeedTypeToggle() {
         const container = document.createElement('div');
         container.id = FEED_TYPE_TOGGLE_ID;
@@ -810,6 +784,7 @@
             tab.textContent = feedType.label;
             tab.dataset.feedType = feedType.id;
             tab.style.cursor = 'pointer';
+            tab.style.textDecoration = 'none';
             tab.style.borderBottom = '2px solid transparent';
             tab.addEventListener('click', (event) => {
                 event.preventDefault();
@@ -826,16 +801,11 @@
 
     function applyFeedTypeToggleState(container) {
         const current = getCurrentFeedType();
-        const navLinkStyle = getInactiveNavLinkStyle();
         container.querySelectorAll('[data-feed-type]').forEach(tab => {
-            copyNavLinkStyle(tab, navLinkStyle);
             const active = tab.dataset.feedType === current;
             tab.style.borderBottomColor = active ? BUTTON_ACTIVE_COLOR : 'transparent';
-            tab.style.textDecoration = 'none';
-            // Strava's header no longer always has a .nav-link to copy from;
-            // without one the tab would keep the browser's blue link color.
-            tab.style.fontWeight = active ? '700' : (navLinkStyle?.fontWeight || '400');
-            tab.style.color = active ? '#000' : (navLinkStyle?.color || FEED_TAB_INACTIVE_COLOR);
+            tab.style.fontWeight = active ? '700' : '400';
+            tab.style.color = active ? FEED_TAB_ACTIVE_COLOR : FEED_TAB_INACTIVE_COLOR;
         });
     }
 
@@ -844,7 +814,7 @@
             return;
         }
 
-        const feedSourceForm = document.getElementById(FEED_FILTER_INPUT_ID)?.closest('form');
+        const feedSourceForm = document.getElementById(FEED_SOURCE_INPUT_ID)?.closest('form');
         if (!feedSourceForm) {
             return;
         }
@@ -896,7 +866,7 @@
             padding:2px 4px; line-height:0; flex-shrink:0;
             display:inline-flex; align-items:center; justify-content:center;
         `;
-        button.appendChild(createStravaShareChevronIcon());
+        button.appendChild(createChevronDownIcon());
         button.addEventListener('click', (event) => {
             event.preventDefault();
             const opening = feedSourceForm.style.display === 'none';
@@ -906,6 +876,8 @@
         return button;
     }
 
+    // Strava's CSS-module class names are hashed per build, so borrow the live
+    // kudos button's class to make our buttons look like Strava's own.
     function applyStravaKudosButtonClass() {
         if (!stravaKudosButtonClass) {
             const kudosButton = document.querySelector('[data-testid="kudos_button"]');
@@ -927,20 +899,6 @@
         }
     }
 
-    function styleGiftLinksAsNavLinks() {
-        const unstyledGiftLinks = document.querySelectorAll(UNSTYLED_GIFT_LINK_SELECTOR);
-        if (unstyledGiftLinks.length === 0) {
-            return;
-        }
-
-        const navLinkStyle = getInactiveNavLinkStyle();
-        unstyledGiftLinks.forEach(link => {
-            link.classList.remove('btn', 'btn-sm', 'btn-primary', 'experiment');
-            link.classList.add('nav-link');
-            copyNavLinkStyle(link, navLinkStyle);
-        });
-    }
-
     function scheduleDashboardRefresh() {
         if (dashboardRefreshScheduled) {
             return;
@@ -953,8 +911,9 @@
     function refreshDashboardAfterDomChange() {
         dashboardRefreshScheduled = false;
         mountFeedControlsIfNeeded();
-        styleGiftLinksAsNavLinks();
 
+        // The header can render after the feed; "Hide my own posts" needs the
+        // athlete id from it, so recheck the feed once the id shows up.
         const previousAthleteId = myAthleteId;
         myAthleteId ??= findMyAthleteIdInHeader();
         observeCurrentFeedContainer();
@@ -983,7 +942,6 @@
         installFilterStyles();
         syncBodyFilterClasses();
         mountFeedControlsIfNeeded();
-        styleGiftLinksAsNavLinks();
         myAthleteId = findMyAthleteIdInHeader();
         observeCurrentFeedContainer();
         new MutationObserver(scheduleDashboardRefresh).observe(document.body, { childList: true, subtree: true });
