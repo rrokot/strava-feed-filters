@@ -28,11 +28,14 @@ Each store job runs in its own GitHub environment (`chrome-web-store`,
 
 Publishing uses the Chrome Web Store API v2 as a service account with Workload Identity
 Federation: GitHub's OIDC token is exchanged for a short-lived access token, so no keys
-or refresh tokens are stored anywhere. The Google Cloud project, the service account and
-the `github` Workload Identity pool are shared with the publisher's other extensions and
-are described in
-[bechdel-test-for-movie-sites](https://github.com/rrokot/bechdel-test-for-movie-sites/blob/main/docs/releasing.md#chrome-web-store-access).
-This repository only needs to be allowed to impersonate the service account:
+or refresh tokens are stored anywhere.
+
+A Chrome Web Store publisher can have only one service account, so the Google Cloud side
+is shared by all of the publisher's extensions and already exists: one project with the
+Chrome Web Store, IAM, IAM Credentials and STS APIs enabled; a service account with no
+IAM roles, added in the Developer Dashboard under **Settings → Account**; and a Workload
+Identity pool `github` whose OIDC provider accepts only the owner's repositories. This
+repository only needs to be allowed to impersonate the service account:
 
 ```sh
 gcloud iam service-accounts add-iam-policy-binding SERVICE_ACCOUNT_EMAIL \
